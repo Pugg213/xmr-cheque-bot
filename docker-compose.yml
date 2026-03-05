@@ -1,0 +1,98 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: xmr-bot-redis
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - xmr-bot-net
+
+  monerod:
+    image: ghcr.io/sethforprivacy/simple-monerod:latest
+    container_name: xmr-bot-monerod
+    command:
+      - --stagenet
+      - --p2p-bind-ip=0.0.0.0
+      - --p2p-bind-port=38080
+      - --rpc-bind-ip=0.0.0.0
+      - --rpc-bind-port=38081
+      - --confirm-external-bind
+      - --no-igd
+      - --enable-dns-blocklist
+      - --prune-blockchain
+      - --db-sync-mode=safe:sync:1000
+    volumes:
+      - monero_data:/home/monero/.bitmonero
+    networks:
+      - xmr-bot-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:38081/get_height"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  monero-wallet-rpc:
+    image: ghcr.io/sethforprivacy/simple-monero-wallet-rpc:latest
+    container_name: xmr-bot-wallet-rpc
+    command:
+      - --stagenet
+      - --daemon-address=monerod:38081
+      - --rpc-bind-ip=0.0.0.0
+      - --rpc-bind-port=38083
+      - --confirm-external-bind
+      - --rpc-login=${WALLET_RPC_USER}:${WALLET_RPC_PASS}
+      - --wallet-dir=/wallet
+      - --log-level=1
+    volumes:
+      - wallet_files:/wallet
+    depends_on:
+      monerod:
+        condition: service_healthy
+    networks:
+      - xmr-bot-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:38083/json_rpc", "-d", '{"jsonrpc":"2.0","id":"0","method":"get_version"}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xmr-bot-app
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONERO_RPC_URL=http://${WALLET_RPC_USER}:${WALLET_RPC_PASS}@monero-wallet-rpc:38083/json_rpc
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - VIEW_KEY_ENCRYPTION_KEY=${VIEW_KEY_ENCRYPTION_KEY}
+      - COINGECKO_API_KEY=${COINGECKO_API_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+      monero-wallet-rpc:
+        condition: service_healthy
+    networks:
+      - xmr-bot-net
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+  monero_data:
+    driver: local
+  wallet_files:
+    driver: local
+
+networks:
+  xmr-bot-net:
+    driver: bridge
