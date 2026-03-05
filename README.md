@@ -92,11 +92,17 @@ docker compose logs -f app
 
 По умолчанию конфигурация работает в **stagenet** — тестовой сети Monero.
 
-Для mainnet потребуется изменить:
-1. Убрать `--stagenet` флаги из `docker-compose.yml`
-2. Изменить порты monerod (18080/18081 вместо 38080/38081)
-3. Изменить порт wallet-rpc (18083 вместо 38083)
-4. Использовать надёжный monerod (локальный или доверенный удалённый)
+Для **mainnet** НЕ нужно править базовый `docker-compose.yml` вручную.
+Используй override-файл `docker-compose.mainnet.yml`:
+
+```bash
+# mainnet (override)
+docker compose -f docker-compose.yml -f docker-compose.mainnet.yml up -d --build
+```
+
+Что меняется в override:
+- убирается `--stagenet`
+- порты становятся mainnet: monerod 18080/18081, wallet-rpc 18083
 
 ## Тестирование
 

@@ -12,6 +12,7 @@ services:
       retries: 5
     networks:
       - xmr-bot-net
+    restart: unless-stopped
 
   monerod:
     image: ghcr.io/sethforprivacy/simple-monerod:latest
@@ -37,6 +38,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    restart: unless-stopped
 
   monero-wallet-rpc:
     image: ghcr.io/sethforprivacy/simple-monero-wallet-rpc:latest
@@ -63,6 +65,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    restart: unless-stopped
 
   app:
     build:

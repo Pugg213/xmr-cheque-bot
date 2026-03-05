@@ -1,0 +1,42 @@
+# Mainnet overrides for XMR Cheque Bot
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.mainnet.yml up -d --build
+
+services:
+  monerod:
+    command:
+      - --p2p-bind-ip=0.0.0.0
+      - --p2p-bind-port=18080
+      - --rpc-bind-ip=0.0.0.0
+      - --rpc-bind-port=18081
+      - --confirm-external-bind
+      - --no-igd
+      - --enable-dns-blocklist
+      - --prune-blockchain
+      - --db-sync-mode=safe:sync:1000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18081/get_height"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  monero-wallet-rpc:
+    command:
+      - --daemon-address=monerod:18081
+      - --rpc-bind-ip=0.0.0.0
+      - --rpc-bind-port=18083
+      - --confirm-external-bind
+      - --rpc-login=${WALLET_RPC_USER}:${WALLET_RPC_PASS}
+      - --wallet-dir=/wallet
+      - --log-level=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18083/json_rpc", "-d", '{"jsonrpc":"2.0","id":"0","method":"get_version"}' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  app:
+    environment:
+      - MONERO_RPC_URL=http://${WALLET_RPC_USER}:${WALLET_RPC_PASS}@monero-wallet-rpc:18083/json_rpc
