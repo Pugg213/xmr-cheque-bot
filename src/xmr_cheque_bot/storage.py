@@ -401,6 +401,32 @@ class RedisStorage:
         logger.info("cheque_cancelled", cheque_id=cheque_id, user_id=cheque.user_id)
         return cheque
 
+    async def delete_cheque(self, user_id: str, cheque_id: str) -> bool:
+        """Delete a cheque from user's history/index.
+
+        Notes:
+        - This does NOT affect any on-chain funds; it only removes local tracking.
+        - Only the owner can delete.
+
+        Returns:
+            True if deleted, False if not found / not owned by user.
+        """
+        cheque = await self.get_cheque(cheque_id)
+        if cheque is None or cheque.user_id != user_id:
+            return False
+
+        r = await self._get_redis()
+
+        # Remove the cheque record
+        await r.delete(RedisKeys.cheque(cheque_id))
+
+        # Remove from indices
+        await r.zrem(RedisKeys.user_cheques_index(user_id), cheque_id)
+        await r.zrem(RedisKeys.PENDING_CHEQUES, cheque_id)
+
+        logger.info("cheque_deleted", cheque_id=cheque_id, user_id=user_id)
+        return True
+
     async def list_user_cheques(
         self,
         user_id: str,

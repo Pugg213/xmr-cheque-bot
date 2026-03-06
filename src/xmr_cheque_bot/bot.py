@@ -10,6 +10,9 @@ Provides handlers for:
 
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import structlog
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ParseMode
@@ -17,6 +20,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -26,11 +30,11 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from xmr_cheque_bot.amount import compute_cheque_amount
+from xmr_cheque_bot.amount import atomic_to_xmr, compute_cheque_amount
 from xmr_cheque_bot.config import get_settings
 from xmr_cheque_bot.i18n import I18n, I18nKeys, get_language_from_telegram_code
 from xmr_cheque_bot.monero_rpc import MoneroWalletRPC
-from xmr_cheque_bot.storage import RedisStorage
+from xmr_cheque_bot.storage import RedisStorage, StorageError
 from xmr_cheque_bot.uri_qr import generate_payment_qr
 from xmr_cheque_bot.validators import (
     ValidationError,
@@ -87,6 +91,46 @@ def get_i18n(state: FSMContext | None = None, lang: str = "en") -> I18n:
         # This is a simplified version - in practice, fetch from storage
         pass
     return I18n(lang)
+
+
+_MSK = ZoneInfo("Europe/Moscow")
+
+
+def fmt_dt_msk(dt: datetime | None) -> str:
+    if dt is None:
+        return "-"
+    try:
+        return dt.astimezone(_MSK).strftime("%Y-%m-%d %H:%M MSK")
+    except Exception:
+        # Fallback: best-effort string
+        return str(dt)
+
+
+def short_cheque_id(cheque_id: str) -> str:
+    # Keep it compact for chat UI
+    return cheque_id.replace("chq_", "")[:8]
+
+
+async def resolve_user_cheque_id(storage: RedisStorage, user_id: str, token: str) -> str | None:
+    """Resolve a user-provided cheque token to a full cheque_id.
+
+    Accepts:
+    - full id like chq_0123abcd...
+    - short prefix like 0123abcd (first 8)
+    """
+    token = (token or "").strip()
+    if not token:
+        return None
+
+    if token.startswith("chq_"):
+        return token
+
+    # Try prefix match within user's recent cheques
+    cheques = await storage.list_user_cheques(user_id, limit=50)
+    matches = [c.cheque_id for c in cheques if c.cheque_id.replace("chq_", "").startswith(token)]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def build_main_reply_keyboard() -> ReplyKeyboardMarkup:
@@ -274,15 +318,161 @@ async def cmd_mycheques(message: Message, storage: RedisStorage) -> None:
     cheques = await storage.list_user_cheques(user_id, limit=10)
 
     if not cheques:
-        await message.answer(i18n.t(I18nKeys.CHEQUE_LIST_EMPTY))
+        await message.answer(i18n.t(I18nKeys.CHEQUE_LIST_EMPTY), reply_markup=build_main_reply_keyboard())
         return
 
     lines = [i18n.t(I18nKeys.CHEQUE_LIST_TITLE)]
     for c in cheques:
         status_text = i18n.status(c.status.value)
-        lines.append(f"• {status_text} — {c.amount_rub} RUB")
+        cid = short_cheque_id(c.cheque_id)
+        created = fmt_dt_msk(c.created_at)
+        expires = fmt_dt_msk(c.expires_at)
+        xmr = c.amount_xmr_display or "?"
 
-    await message.answer("\n".join(lines), parse_mode=ParseMode.HTML)
+        extra: list[str] = []
+        if c.tx_hash:
+            extra.append(f"tx <code>{c.tx_hash[:8]}</code>")
+        if c.confirmations:
+            extra.append(f"conf {c.confirmations}")
+        if (c.expires_at is not None) and (not c.is_final()):
+            extra.append(f"exp {expires}")
+
+        line = (
+            f"• {status_text} | {c.amount_rub} ₽ | <code>{xmr}</code> XMR | {created} | id <code>{cid}</code>"
+        )
+        if extra:
+            line += " | " + ", ".join(extra)
+
+        lines.append(line)
+
+    lines.append("")
+    lines.append("Управление: /cheque <id> /cancel <id> /delete <id>")
+
+    await message.answer(
+        "\n".join(lines),
+        parse_mode=ParseMode.HTML,
+        reply_markup=build_main_reply_keyboard(),
+    )
+
+
+@router.message(Command("cheque"))
+async def cmd_cheque_details(message: Message, storage: RedisStorage) -> None:
+    """Show full details for a cheque and re-send QR."""
+    user_id = str(message.from_user.id)
+    lang = await get_user_language(storage, user_id, message.from_user.language_code)
+    i18n = I18n(lang)
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Usage: /cheque <id>", reply_markup=build_main_reply_keyboard())
+        return
+
+    cheque_id = await resolve_user_cheque_id(storage, user_id, parts[1])
+    if cheque_id is None:
+        await message.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), reply_markup=build_main_reply_keyboard())
+        return
+
+    cheque = await storage.get_cheque(cheque_id)
+    if cheque is None or cheque.user_id != user_id:
+        await message.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), reply_markup=build_main_reply_keyboard())
+        return
+
+    cid = short_cheque_id(cheque.cheque_id)
+    status_text = i18n.status(cheque.status.value)
+    created = fmt_dt_msk(cheque.created_at)
+    expires = fmt_dt_msk(cheque.expires_at)
+    xmr = cheque.amount_xmr_display or format(atomic_to_xmr(cheque.amount_atomic_expected), ".12f")
+
+    details = (
+        f"<b>{i18n.t(I18nKeys.CHEQUE_DETAILS)}</b>\n"
+        f"ID: <code>{cid}</code>\n"
+        f"Created: {created}\n"
+        f"{i18n.t(I18nKeys.CHEQUE_STATUS)}: {status_text}\n"
+        f"{i18n.t(I18nKeys.CHEQUE_AMOUNT_RUB)}: <code>{cheque.amount_rub}</code>\n"
+        f"{i18n.t(I18nKeys.CHEQUE_AMOUNT_XMR)}: <code>{xmr}</code>\n"
+        f"{i18n.t(I18nKeys.CHEQUE_EXPIRES_AT)}: {expires}\n"
+        f"{i18n.t(I18nKeys.CHEQUE_ADDRESS)}: <code>{cheque.monero_address}</code>"
+    )
+
+    pay_instructions = i18n.t(I18nKeys.CHEQUE_PAY_INSTRUCTIONS, xmr=xmr, addr=cheque.monero_address)
+
+    try:
+        qr_bytes = generate_payment_qr(
+            address=cheque.monero_address,
+            amount_xmr=xmr,
+            tx_description=cheque.description or None,
+        )
+        photo = BufferedInputFile(qr_bytes, filename="cheque.png")
+        await message.answer_photo(
+            photo=photo,
+            caption=details + "\n\n" + pay_instructions,
+            parse_mode=ParseMode.HTML,
+            reply_markup=build_main_reply_keyboard(),
+        )
+    except Exception as e:
+        logger.error("cheque_details_qr_failed", user_id=user_id, cheque_id=cheque.cheque_id, error=str(e))
+        await message.answer(
+            details + "\n\n" + pay_instructions,
+            parse_mode=ParseMode.HTML,
+            reply_markup=build_main_reply_keyboard(),
+        )
+
+
+@router.message(Command("cancel"))
+async def cmd_cancel_cheque(message: Message, storage: RedisStorage) -> None:
+    """Cancel a pending cheque."""
+    user_id = str(message.from_user.id)
+    lang = await get_user_language(storage, user_id, message.from_user.language_code)
+    i18n = I18n(lang)
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Usage: /cancel <id>", reply_markup=build_main_reply_keyboard())
+        return
+
+    cheque_id = await resolve_user_cheque_id(storage, user_id, parts[1])
+    if cheque_id is None:
+        await message.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), reply_markup=build_main_reply_keyboard())
+        return
+
+    cheque = await storage.get_cheque(cheque_id)
+    if cheque is None or cheque.user_id != user_id:
+        await message.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), reply_markup=build_main_reply_keyboard())
+        return
+
+    try:
+        await storage.cancel_cheque(cheque_id)
+        await message.answer(i18n.t(I18nKeys.CHEQUE_CANCEL_SUCCESS), reply_markup=build_main_reply_keyboard())
+    except StorageError:
+        await message.answer(i18n.t(I18nKeys.CHEQUE_CANCEL_INVALID_STATE), reply_markup=build_main_reply_keyboard())
+
+
+@router.message(Command("delete"))
+async def cmd_delete_cheque(message: Message, storage: RedisStorage) -> None:
+    """Delete a cheque record from history/index."""
+    user_id = str(message.from_user.id)
+    lang = await get_user_language(storage, user_id, message.from_user.language_code)
+    i18n = I18n(lang)
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Usage: /delete <id>", reply_markup=build_main_reply_keyboard())
+        return
+
+    cheque_id = await resolve_user_cheque_id(storage, user_id, parts[1])
+    if cheque_id is None:
+        await message.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), reply_markup=build_main_reply_keyboard())
+        return
+
+    ok = await storage.delete_cheque(user_id=user_id, cheque_id=cheque_id)
+    if not ok:
+        await message.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), reply_markup=build_main_reply_keyboard())
+        return
+
+    await message.answer(
+        "✅ Удалено." if lang == "ru" else "✅ Deleted.",
+        reply_markup=build_main_reply_keyboard(),
+    )
 
 
 @router.message(Command("settings"))
@@ -723,18 +913,33 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
                 addr=wallet.monero_address,
             )
 
+            photo = BufferedInputFile(qr_bytes, filename="cheque.png")
+
             await callback.message.answer_photo(
-                photo=qr_bytes,
-                caption=i18n.t(I18nKeys.CHEQUE_QR_CAPTION) + "\n\n" + pay_instructions,
+                photo=photo,
+                caption=(
+                    i18n.t(I18nKeys.CHEQUE_QR_CAPTION)
+                    + "\n\n"
+                    + pay_instructions
+                    + "\n\n"
+                    + f"ID: <code>{short_cheque_id(cheque.cheque_id)}</code>"
+                ),
                 parse_mode=ParseMode.HTML,
+                reply_markup=build_main_reply_keyboard(),
             )
         except Exception as e:
             logger.error("qr_generation_failed", user_id=user_id, error=str(e))
             # Still show address even if QR fails
             await callback.message.answer(
-                f"Send exactly <code>{amount_xmr}</code> XMR to:\n"
-                f"<code>{wallet.monero_address}</code>",
+                i18n.t(
+                    I18nKeys.CHEQUE_PAY_INSTRUCTIONS,
+                    xmr=amount_xmr,
+                    addr=wallet.monero_address,
+                )
+                + "\n\n"
+                + f"ID: <code>{short_cheque_id(cheque.cheque_id)}</code>",
                 parse_mode=ParseMode.HTML,
+                reply_markup=build_main_reply_keyboard(),
             )
 
     except Exception as e:
