@@ -13,10 +13,11 @@ from xmr_cheque_bot.storage import RedisStorage
 # Import bot-related modules only when needed
 try:
     from aiogram import Bot, Dispatcher
+    from aiogram import BaseMiddleware
 
     from xmr_cheque_bot.bot import router
 except ImportError:
-    Bot = Dispatcher = router = None  # type: ignore
+    Bot = Dispatcher = router = BaseMiddleware = None  # type: ignore
 
 
 @asynccontextmanager
@@ -42,12 +43,24 @@ async def setup_rpc():
 
 async def run_bot() -> None:
     """Run Telegram bot (aiogram polling)."""
-    if Bot is None or Dispatcher is None:
+    if Bot is None or Dispatcher is None or BaseMiddleware is None:
         raise RuntimeError("aiogram not installed, cannot run bot mode")
+
+    class StorageMiddleware(BaseMiddleware):
+        def __init__(self, storage: RedisStorage):
+            self._storage = storage
+
+        async def __call__(self, handler, event, data):  # type: ignore[override]
+            data["storage"] = self._storage
+            return await handler(event, data)
 
     settings = get_settings()
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
+
+    # Shared storage instance injected into handlers
+    storage = RedisStorage()
+    dp.update.middleware(StorageMiddleware(storage))
 
     # Include router
     dp.include_router(router)
@@ -58,6 +71,7 @@ async def run_bot() -> None:
     try:
         await dp.start_polling(bot)
     finally:
+        await storage.close()
         await bot.session.close()
 
 
