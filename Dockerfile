@@ -8,14 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e .
-
-# Copy application code
+# Copy project metadata + sources (needed for editable install)
+COPY pyproject.toml README.md ./
 COPY src/ ./src/
 
-# Install the package itself
+# Install the package (editable)
 RUN pip install --no-cache-dir -e .
 
 # Run as non-root user
