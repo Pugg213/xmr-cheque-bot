@@ -48,7 +48,6 @@ services:
       - --stagenet
       - --daemon-address=monerod:38081
       - --rpc-bind-port=38083
-      - --confirm-external-bind
       - --rpc-login=${WALLET_RPC_USER}:${WALLET_RPC_PASS}
       - --wallet-dir=/wallet
       - --log-level=1
