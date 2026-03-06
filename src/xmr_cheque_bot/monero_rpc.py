@@ -30,7 +30,7 @@ class MoneroWalletRPC:
         url: str = "http://localhost:18082/json_rpc",
         username: str = "",
         password: str = "",
-        timeout: float = 60.0,
+        timeout: float = 180.0,
     ) -> None:
         """Initialize the RPC client.
 
