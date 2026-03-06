@@ -59,7 +59,8 @@ jobs:
       - name: Run unit tests
         env:
           BOT_TOKEN: test_token_for_ci_not_real
-          VIEW_KEY_ENCRYPTION_KEY: dGVzdF9rZXlfZm9yX2NpXzMyYnl0ZXNfbG9uZ19lbm91Z2g=
+          # 32-byte urlsafe base64 key (non-secret; CI only)
+          VIEW_KEY_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
           REDIS_URL: redis://localhost:6379/0
           APP_MODE: bot
           LOG_LEVEL: DEBUG
@@ -138,7 +139,8 @@ jobs:
       - name: Run integration tests
         env:
           BOT_TOKEN: test_token_for_ci
-          VIEW_KEY_ENCRYPTION_KEY: dGVzdF9rZXlfZm9yX2NpXzMyYnl0ZXNfbG9uZ19lbm91Z2g=
+          # 32-byte urlsafe base64 key (non-secret; CI only)
+          VIEW_KEY_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
           REDIS_URL: redis://localhost:6379/0
         run: |
           # Run tests marked as integration
