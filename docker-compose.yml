@@ -78,6 +78,7 @@ services:
       - BOT_TOKEN=${BOT_TOKEN}
       - VIEW_KEY_ENCRYPTION_KEY=${VIEW_KEY_ENCRYPTION_KEY}
       - COINGECKO_API_KEY=${COINGECKO_API_KEY}
+      - APP_MODE=${APP_MODE:-bot}
     depends_on:
       redis:
         condition: service_healthy
