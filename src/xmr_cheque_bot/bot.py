@@ -182,15 +182,12 @@ async def resolve_user_cheque_id(storage: RedisStorage, user_id: str, token: str
 
 
 def build_main_reply_keyboard() -> ReplyKeyboardMarkup:
-    """Main reply keyboard with core commands.
-
-    Uses command buttons so we don't need extra callback routing.
-    """
+    """Main reply keyboard with human-friendly labels."""
 
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="/bind"), KeyboardButton(text="/create")],
-            [KeyboardButton(text="/mycheques"), KeyboardButton(text="/settings")],
+            [KeyboardButton(text="🔗 Привязать кошелёк"), KeyboardButton(text="🎫 Создать чек")],
+            [KeyboardButton(text="📋 Мои чеки"), KeyboardButton(text="⚙️ Настройки")],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -350,11 +347,36 @@ async def cmd_start(message: Message, state: FSMContext, storage: RedisStorage) 
         reply_markup=build_lang_keyboard(),
     )
 
-    # Show main command keyboard for quick navigation
+    # Show main menu keyboard for quick navigation
     await message.answer(
-        "Команды: /bind /create /mycheques /settings",
+        "Выберите действие в меню ниже.",
         reply_markup=build_main_reply_keyboard(),
     )
+
+
+# Human-friendly menu buttons (reply keyboard)
+@router.message(F.text == "🔗 Привязать кошелёк")
+async def menu_bind(message: Message, state: FSMContext, storage: RedisStorage) -> None:
+    await state.clear()
+    await cmd_bind(message, state, storage)
+
+
+@router.message(F.text == "🎫 Создать чек")
+async def menu_create(message: Message, state: FSMContext, storage: RedisStorage) -> None:
+    await state.clear()
+    await cmd_create(message, state, storage)
+
+
+@router.message(F.text == "📋 Мои чеки")
+async def menu_mycheques(message: Message, state: FSMContext, storage: RedisStorage) -> None:
+    await state.clear()
+    await cmd_mycheques(message, storage)
+
+
+@router.message(F.text == "⚙️ Настройки")
+async def menu_settings(message: Message, state: FSMContext, storage: RedisStorage) -> None:
+    await state.clear()
+    await cmd_settings(message, storage)
 
 
 @router.message(Command("bind"))
