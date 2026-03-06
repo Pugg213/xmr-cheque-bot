@@ -12,8 +12,7 @@ from xmr_cheque_bot.storage import RedisStorage
 
 # Import bot-related modules only when needed
 try:
-    from aiogram import Bot, Dispatcher
-    from aiogram import BaseMiddleware
+    from aiogram import BaseMiddleware, Bot, Dispatcher
 
     from xmr_cheque_bot.bot import router
 except ImportError:

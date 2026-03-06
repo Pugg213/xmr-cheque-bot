@@ -19,7 +19,9 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
+    ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -85,6 +87,23 @@ def get_i18n(state: FSMContext | None = None, lang: str = "en") -> I18n:
         # This is a simplified version - in practice, fetch from storage
         pass
     return I18n(lang)
+
+
+def build_main_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Main reply keyboard with core commands.
+
+    Uses command buttons so we don't need extra callback routing.
+    """
+
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="/bind"), KeyboardButton(text="/create")],
+            [KeyboardButton(text="/mycheques"), KeyboardButton(text="/settings")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        selective=True,
+    )
 
 
 def build_lang_keyboard() -> InlineKeyboardMarkup:
@@ -155,6 +174,12 @@ async def cmd_start(message: Message, state: FSMContext, storage: RedisStorage) 
         i18n.t(I18nKeys.START_WELCOME),
         parse_mode=ParseMode.HTML,
         reply_markup=build_lang_keyboard(),
+    )
+
+    # Show main command keyboard for quick navigation
+    await message.answer(
+        "Команды: /bind /create /mycheques /settings",
+        reply_markup=build_main_reply_keyboard(),
     )
 
 
