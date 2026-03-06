@@ -24,6 +24,12 @@ class Settings(BaseSettings):
         default="http://localhost:18083/json_rpc", description="monero-wallet-rpc URL"
     )
 
+    # Monero daemon RPC (optional but recommended: used for chain height without requiring an opened wallet)
+    daemon_rpc_url: str | None = Field(
+        default=None,
+        description="monerod RPC base URL (e.g. http://localhost:18081)",
+    )
+
     # Encryption
     view_key_encryption_key: str = Field(
         ..., description="Fernet key for encrypting view keys (32 bytes base64)"

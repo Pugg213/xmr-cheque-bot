@@ -1052,9 +1052,9 @@ async def process_view_key(message: Message, state: FSMContext, storage: RedisSt
 
     try:
         async with MoneroWalletRPC(url=settings.monero_rpc_url) as rpc:
-            # Get current height for restore
-            current_height = await rpc.get_current_height()
-            restore_height = max(0, current_height - 100)
+            # NOTE: monero-wallet-rpc `get_height` can require an opened wallet in some configs.
+            # For binding we keep it reliable and start from 0; the cheque monitor uses per-cheque min_height.
+            restore_height = 0
 
             # Create view-only wallet on RPC (with password)
             await rpc.generate_from_keys(
@@ -1233,20 +1233,34 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
         await callback.answer()
         return
 
-    # Use actual blockchain height (with small reorg buffer) to filter incoming transfers.
+    # Determine current chain height for tx filtering.
+    # Prefer daemon RPC (does not require an opened wallet). Fallback to wallet-rpc.
     settings = get_settings()
-    try:
-        async with MoneroWalletRPC(url=settings.monero_rpc_url) as rpc:
-            current_height = await rpc.get_current_height()
-    except Exception as e:
-        logger.error("monero_rpc_get_height_failed", user_id=user_id, error=str(e))
-        await callback.message.edit_text(i18n.t(I18nKeys.ERROR_GENERIC))
-        await state.clear()
-        await callback.answer()
-        return
+    current_height: int | None = None
 
+    if settings.daemon_rpc_url:
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                url = settings.daemon_rpc_url.rstrip("/") + "/get_height"
+                resp = await client.get(url)
+                resp.raise_for_status()
+                current_height = int(resp.json().get("height", 0))
+        except Exception as e:
+            logger.error("daemon_get_height_failed", user_id=user_id, error=str(e))
+
+    if current_height is None:
+        try:
+            async with MoneroWalletRPC(url=settings.monero_rpc_url) as rpc:
+                current_height = await rpc.get_current_height()
+        except Exception as e:
+            logger.error("monero_rpc_get_height_failed", user_id=user_id, error=str(e))
+
+    # If height is unknown, still allow cheque creation (worst case: min_height=0).
     reorg_buffer = 30
-    min_height = max(0, current_height - reorg_buffer)
+    base_height = int(current_height or 0)
+    min_height = max(0, base_height - reorg_buffer)
 
     try:
         # Create cheque
