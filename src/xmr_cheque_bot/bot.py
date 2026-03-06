@@ -10,9 +10,7 @@ Provides handlers for:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
-
+import structlog
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
@@ -20,21 +18,17 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
-    InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
     ReplyKeyboardRemove,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-import structlog
-
 from xmr_cheque_bot.amount import compute_cheque_amount
 from xmr_cheque_bot.config import get_settings
 from xmr_cheque_bot.i18n import I18n, I18nKeys, get_language_from_telegram_code
 from xmr_cheque_bot.monero_rpc import MoneroWalletRPC
-from xmr_cheque_bot.redis_schema import ChequeStatus
-from xmr_cheque_bot.storage import RedisStorage, StorageError
+from xmr_cheque_bot.storage import RedisStorage
 from xmr_cheque_bot.uri_qr import generate_payment_qr
 from xmr_cheque_bot.validators import (
     ValidationError,
@@ -54,8 +48,10 @@ router = Router()
 # FSM States
 # =============================================================================
 
+
 class BindWalletStates(StatesGroup):
     """States for wallet binding flow."""
+
     safety_warning = State()
     enter_address = State()
     confirm_address = State()
@@ -65,6 +61,7 @@ class BindWalletStates(StatesGroup):
 
 class CreateChequeStates(StatesGroup):
     """States for cheque creation flow."""
+
     enter_amount = State()
     enter_description = State()
     confirm_cheque = State()
@@ -72,12 +69,14 @@ class CreateChequeStates(StatesGroup):
 
 class DeleteDataStates(StatesGroup):
     """States for data deletion flow."""
+
     confirm_deletion = State()
 
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
 
 def get_i18n(state: FSMContext | None = None, lang: str = "en") -> I18n:
     """Get I18n instance from state or language."""
@@ -123,7 +122,9 @@ def build_settings_keyboard(i18n: I18n) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-async def get_user_language(storage: RedisStorage, user_id: str, telegram_lang: str | None = None) -> str:
+async def get_user_language(
+    storage: RedisStorage, user_id: str, telegram_lang: str | None = None
+) -> str:
     """Get user's language from storage or Telegram."""
     user = await storage.get_user(user_id)
     if user is not None:
@@ -135,20 +136,21 @@ async def get_user_language(storage: RedisStorage, user_id: str, telegram_lang: 
 # Command Handlers
 # =============================================================================
 
+
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext, storage: RedisStorage) -> None:
     """Handle /start command."""
     user_id = str(message.from_user.id)
     telegram_lang = message.from_user.language_code
-    
+
     # Get or create user
     lang = await get_user_language(storage, user_id, telegram_lang)
     user = await storage.get_or_create_user(user_id, lang)
     i18n = I18n(user.language)
-    
+
     # Clear any existing state
     await state.clear()
-    
+
     await message.answer(
         i18n.t(I18nKeys.START_WELCOME),
         parse_mode=ParseMode.HTML,
@@ -162,37 +164,40 @@ async def cmd_bind(message: Message, state: FSMContext, storage: RedisStorage) -
     user_id = str(message.from_user.id)
     lang = await get_user_language(storage, user_id, message.from_user.language_code)
     i18n = I18n(lang)
-    
+
     # Check if already bound
     if await storage.has_wallet(user_id):
         await message.answer(i18n.t(I18nKeys.WALLET_BIND_ALREADY_BOUND))
         return
-    
+
     # Check rate limit
     if await storage.check_wallet_bind_rate_limit(user_id):
         await message.answer(i18n.t(I18nKeys.WALLET_BIND_RATE_LIMIT))
         return
-    
+
     # Start binding flow with safety warning
     await state.set_state(BindWalletStates.safety_warning)
-    
+
     # Show backup warning first
     await message.answer(
-        i18n.t(I18nKeys.WALLET_VIEWKEY_BACKUP_TITLE) + "\n\n" +
-        i18n.t(I18nKeys.WALLET_VIEWKEY_BACKUP_TEXT) + "\n\n" +
-        i18n.t(I18nKeys.WALLET_VIEWKEY_NEVER_SHARE),
+        i18n.t(I18nKeys.WALLET_VIEWKEY_BACKUP_TITLE)
+        + "\n\n"
+        + i18n.t(I18nKeys.WALLET_VIEWKEY_BACKUP_TEXT)
+        + "\n\n"
+        + i18n.t(I18nKeys.WALLET_VIEWKEY_NEVER_SHARE),
         parse_mode=ParseMode.HTML,
     )
-    
+
     # Show view key warning
     builder = InlineKeyboardBuilder()
     builder.button(text=i18n.t(I18nKeys.WALLET_VIEWKEY_UNDERSTAND), callback_data="bind:understand")
     builder.button(text=i18n.t(I18nKeys.CANCEL), callback_data="action:cancel")
     builder.adjust(1)
-    
+
     await message.answer(
-        i18n.t(I18nKeys.WALLET_VIEWKEY_WARNING_TITLE) + "\n\n" +
-        i18n.t(I18nKeys.WALLET_VIEWKEY_WARNING_TEXT),
+        i18n.t(I18nKeys.WALLET_VIEWKEY_WARNING_TITLE)
+        + "\n\n"
+        + i18n.t(I18nKeys.WALLET_VIEWKEY_WARNING_TEXT),
         parse_mode=ParseMode.HTML,
         reply_markup=builder.as_markup(),
     )
@@ -204,30 +209,31 @@ async def cmd_create(message: Message, state: FSMContext, storage: RedisStorage)
     user_id = str(message.from_user.id)
     lang = await get_user_language(storage, user_id, message.from_user.language_code)
     i18n = I18n(lang)
-    
+
     # Check if wallet bound
     if not await storage.has_wallet(user_id):
         await message.answer(i18n.t(I18nKeys.ERROR_WALLET_NOT_BOUND))
         return
-    
+
     # Check rate limit
     if await storage.check_cheque_rate_limit(user_id):
         await message.answer(i18n.t(I18nKeys.CHEQUE_CREATE_RATE_LIMIT))
         return
-    
+
     # Check max active cheques
     settings = get_settings()
     active_count = await storage.count_active_cheques(user_id)
     if active_count >= settings.max_active_cheques_per_user:
         await message.answer(i18n.t(I18nKeys.CHEQUE_CREATE_MAX_ACTIVE))
         return
-    
+
     # Start creation flow
     await state.set_state(CreateChequeStates.enter_amount)
-    
+
     await message.answer(
-        i18n.t(I18nKeys.CHEQUE_CREATE_PROMPT) + "\n\n" +
-        i18n.t(I18nKeys.CHEQUE_CREATE_ENTER_AMOUNT),
+        i18n.t(I18nKeys.CHEQUE_CREATE_PROMPT)
+        + "\n\n"
+        + i18n.t(I18nKeys.CHEQUE_CREATE_ENTER_AMOUNT),
         parse_mode=ParseMode.HTML,
         reply_markup=build_cancel_keyboard(i18n),
     )
@@ -239,18 +245,18 @@ async def cmd_mycheques(message: Message, storage: RedisStorage) -> None:
     user_id = str(message.from_user.id)
     lang = await get_user_language(storage, user_id, message.from_user.language_code)
     i18n = I18n(lang)
-    
+
     cheques = await storage.list_user_cheques(user_id, limit=10)
-    
+
     if not cheques:
         await message.answer(i18n.t(I18nKeys.CHEQUE_LIST_EMPTY))
         return
-    
+
     lines = [i18n.t(I18nKeys.CHEQUE_LIST_TITLE)]
     for c in cheques:
         status_text = i18n.status(c.status.value)
         lines.append(f"• {status_text} — {c.amount_rub} RUB")
-    
+
     await message.answer("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
@@ -260,7 +266,7 @@ async def cmd_settings(message: Message, storage: RedisStorage) -> None:
     user_id = str(message.from_user.id)
     lang = await get_user_language(storage, user_id, message.from_user.language_code)
     i18n = I18n(lang)
-    
+
     await message.answer(
         i18n.t(I18nKeys.SETTINGS_TITLE),
         parse_mode=ParseMode.HTML,
@@ -272,6 +278,7 @@ async def cmd_settings(message: Message, storage: RedisStorage) -> None:
 # Callback Handlers
 # =============================================================================
 
+
 @router.callback_query(F.data == "lang:en")
 async def set_lang_en(callback: CallbackQuery, storage: RedisStorage) -> None:
     """Set language to English."""
@@ -279,7 +286,7 @@ async def set_lang_en(callback: CallbackQuery, storage: RedisStorage) -> None:
     user = await storage.get_or_create_user(user_id, "en")
     user.language = "en"
     await storage.save_user(user)
-    
+
     i18n = I18n("en")
     await callback.message.edit_text(
         i18n.t(I18nKeys.START_WELCOME) + "\n\n" + i18n.t(I18nKeys.LANGUAGE_SET),
@@ -295,7 +302,7 @@ async def set_lang_ru(callback: CallbackQuery, storage: RedisStorage) -> None:
     user = await storage.get_or_create_user(user_id, "ru")
     user.language = "ru"
     await storage.save_user(user)
-    
+
     i18n = I18n("ru")
     await callback.message.edit_text(
         i18n.t(I18nKeys.START_WELCOME) + "\n\n" + i18n.t(I18nKeys.LANGUAGE_SET),
@@ -305,17 +312,20 @@ async def set_lang_ru(callback: CallbackQuery, storage: RedisStorage) -> None:
 
 
 @router.callback_query(F.data == "bind:understand")
-async def bind_understand(callback: CallbackQuery, state: FSMContext, storage: RedisStorage) -> None:
+async def bind_understand(
+    callback: CallbackQuery, state: FSMContext, storage: RedisStorage
+) -> None:
     """User acknowledged view key warning."""
     user_id = str(callback.from_user.id)
     lang = await get_user_language(storage, user_id, callback.from_user.language_code)
     i18n = I18n(lang)
-    
+
     await state.set_state(BindWalletStates.enter_address)
-    
+
     await callback.message.edit_text(
-        i18n.t(I18nKeys.WALLET_BIND_INSTRUCTIONS) + "\n\n" +
-        i18n.t(I18nKeys.WALLET_BIND_ENTER_ADDRESS),
+        i18n.t(I18nKeys.WALLET_BIND_INSTRUCTIONS)
+        + "\n\n"
+        + i18n.t(I18nKeys.WALLET_BIND_ENTER_ADDRESS),
         parse_mode=ParseMode.HTML,
     )
     await callback.answer()
@@ -327,7 +337,7 @@ async def action_cancel(callback: CallbackQuery, state: FSMContext, storage: Red
     user_id = str(callback.from_user.id)
     lang = await get_user_language(storage, user_id, callback.from_user.language_code)
     i18n = I18n(lang)
-    
+
     await state.clear()
     await callback.message.edit_text(i18n.t(I18nKeys.CANCEL))
     await callback.answer()
@@ -342,22 +352,25 @@ async def action_back(callback: CallbackQuery, state: FSMContext, storage: Redis
 
 
 @router.callback_query(F.data == "settings:delete")
-async def settings_delete(callback: CallbackQuery, state: FSMContext, storage: RedisStorage) -> None:
+async def settings_delete(
+    callback: CallbackQuery, state: FSMContext, storage: RedisStorage
+) -> None:
     """Show delete data confirmation."""
     user_id = str(callback.from_user.id)
     lang = await get_user_language(storage, user_id, callback.from_user.language_code)
     i18n = I18n(lang)
-    
+
     await state.set_state(DeleteDataStates.confirm_deletion)
-    
+
     builder = InlineKeyboardBuilder()
     builder.button(text=i18n.t(I18nKeys.DELETE_DATA_CONFIRM_BUTTON), callback_data="delete:confirm")
     builder.button(text=i18n.t(I18nKeys.CANCEL), callback_data="action:cancel")
     builder.adjust(1)
-    
+
     await callback.message.edit_text(
-        i18n.t(I18nKeys.DELETE_DATA_WARNING_TITLE) + "\n\n" +
-        i18n.t(I18nKeys.DELETE_DATA_WARNING_TEXT),
+        i18n.t(I18nKeys.DELETE_DATA_WARNING_TITLE)
+        + "\n\n"
+        + i18n.t(I18nKeys.DELETE_DATA_WARNING_TEXT),
         parse_mode=ParseMode.HTML,
         reply_markup=builder.as_markup(),
     )
@@ -370,15 +383,16 @@ async def delete_confirm(callback: CallbackQuery, state: FSMContext, storage: Re
     user_id = str(callback.from_user.id)
     lang = await get_user_language(storage, user_id, callback.from_user.language_code)
     i18n = I18n(lang)
-    
+
     # Delete all user data
     deleted = await storage.delete_all_user_data(user_id)
-    
+
     await state.clear()
-    
+
     await callback.message.edit_text(
-        i18n.t(I18nKeys.SETTINGS_DELETE_DATA_SUCCESS) + "\n\n" +
-        f"Deleted: {deleted['cheques']} cheques, wallet, and profile.",
+        i18n.t(I18nKeys.SETTINGS_DELETE_DATA_SUCCESS)
+        + "\n\n"
+        + f"Deleted: {deleted['cheques']} cheques, wallet, and profile.",
     )
     await callback.answer()
 
@@ -397,25 +411,26 @@ async def settings_language(callback: CallbackQuery, storage: RedisStorage) -> N
 # Message Handlers (FSM)
 # =============================================================================
 
+
 @router.message(BindWalletStates.enter_address)
 async def process_address(message: Message, state: FSMContext, storage: RedisStorage) -> None:
     """Process address input."""
     user_id = str(message.from_user.id)
     lang = await get_user_language(storage, user_id, message.from_user.language_code)
     i18n = I18n(lang)
-    
+
     address = message.text.strip() if message.text else ""
-    
+
     try:
         validate_monero_address(address)
-    except ValidationError as e:
+    except ValidationError:
         await message.answer(i18n.t(I18nKeys.WALLET_BIND_INVALID_ADDRESS))
         return
-    
+
     # Store address in state
     await state.update_data(address=address)
     await state.set_state(BindWalletStates.enter_view_key)
-    
+
     await message.answer(
         i18n.t(I18nKeys.WALLET_BIND_CONFIRMATION, address=address),
         parse_mode=ParseMode.HTML,
@@ -429,40 +444,45 @@ async def process_view_key(message: Message, state: FSMContext, storage: RedisSt
     user_id = str(message.from_user.id)
     lang = await get_user_language(storage, user_id, message.from_user.language_code)
     i18n = I18n(lang)
-    
+
     view_key = message.text.strip() if message.text else ""
-    
+
     try:
         validate_view_key(view_key)
     except ValidationError:
         await message.answer(i18n.t(I18nKeys.WALLET_BIND_INVALID_VIEW_KEY))
         return
-    
+
     # Get stored address
     data = await state.get_data()
     address = data.get("address")
-    
+
     if not address:
         await state.clear()
         await message.answer(i18n.t(I18nKeys.ERROR_GENERIC))
         return
-    
+
     # Generate wallet file name and create wallet via RPC
     wallet_file_name = f"wallet_{user_id}"
     settings = get_settings()
-    
+
+    # IMPORTANT: this password MUST be the one used to create/open the wallet file.
+    import secrets
+
+    wallet_password = secrets.token_urlsafe(18)
+
     try:
         async with MoneroWalletRPC(url=settings.monero_rpc_url) as rpc:
             # Get current height for restore
             current_height = await rpc.get_current_height()
             restore_height = max(0, current_height - 100)
-            
-            # Create view-only wallet on RPC
+
+            # Create view-only wallet on RPC (with password)
             await rpc.generate_from_keys(
                 address=address,
                 view_key=view_key,
                 filename=wallet_file_name,
-                password="",  # Password will be set in bind_wallet
+                password=wallet_password,
                 restore_height=restore_height,
             )
             logger.info("wallet_generated_via_rpc", user_id=user_id, restore_height=restore_height)
@@ -471,16 +491,17 @@ async def process_view_key(message: Message, state: FSMContext, storage: RedisSt
         await state.clear()
         await message.answer(i18n.t(I18nKeys.ERROR_GENERIC))
         return
-    
-    # Bind wallet (saves to Redis with encrypted password)
+
+    # Bind wallet (saves to Redis with encrypted view key + encrypted wallet password)
     try:
         await storage.bind_wallet(
             user_id=user_id,
             address=address,
             view_key=view_key,
             wallet_file_name=wallet_file_name,
+            wallet_password=wallet_password,
         )
-        
+
         await state.clear()
         await message.answer(
             i18n.t(I18nKeys.WALLET_BIND_SUCCESS),
@@ -499,22 +520,22 @@ async def process_amount(message: Message, state: FSMContext, storage: RedisStor
     user_id = str(message.from_user.id)
     lang = await get_user_language(storage, user_id, message.from_user.language_code)
     i18n = I18n(lang)
-    
+
     try:
         amount_rub = validate_amount_rub(message.text)
     except ValidationError:
         await message.answer(i18n.t(I18nKeys.CHEQUE_CREATE_INVALID_AMOUNT))
         return
-    
+
     # Store amount
     await state.update_data(amount_rub=amount_rub)
     await state.set_state(CreateChequeStates.enter_description)
-    
+
     builder = InlineKeyboardBuilder()
     builder.button(text="Skip", callback_data="desc:skip")
     builder.button(text=i18n.t(I18nKeys.CANCEL), callback_data="action:cancel")
     builder.adjust(2)
-    
+
     await message.answer(
         i18n.t(I18nKeys.CHEQUE_CREATE_ENTER_DESCRIPTION),
         parse_mode=ParseMode.HTML,
@@ -523,7 +544,9 @@ async def process_amount(message: Message, state: FSMContext, storage: RedisStor
 
 
 @router.callback_query(F.data == "desc:skip")
-async def skip_description(callback: CallbackQuery, state: FSMContext, storage: RedisStorage) -> None:
+async def skip_description(
+    callback: CallbackQuery, state: FSMContext, storage: RedisStorage
+) -> None:
     """Skip description."""
     await state.update_data(description="")
     await show_cheque_summary(callback, state, storage)
@@ -535,14 +558,14 @@ async def process_description(message: Message, state: FSMContext, storage: Redi
     user_id = str(message.from_user.id)
     lang = await get_user_language(storage, user_id, message.from_user.language_code)
     i18n = I18n(lang)
-    
+
     try:
         description = validate_cheque_description(message.text)
     except ValidationError:
         description = ""
-    
+
     await state.update_data(description=description)
-    
+
     # Show summary
     await show_cheque_summary(message, state, storage)
 
@@ -561,13 +584,13 @@ async def show_cheque_summary(
         message = source
         user_id = str(source.from_user.id)
         lang = await get_user_language(storage, user_id, source.from_user.language_code)
-    
+
     i18n = I18n(lang)
-    
+
     data = await state.get_data()
     amount_rub = data.get("amount_rub", 0)
     description = data.get("description", "")
-    
+
     # Compute XMR amount
     try:
         computed = await compute_cheque_amount(amount_rub)
@@ -580,19 +603,19 @@ async def show_cheque_summary(
         await message.answer(i18n.t(I18nKeys.ERROR_GENERIC))
         await state.clear()
         return
-    
+
     data = await state.get_data()  # Refresh with computed values
     amount_xmr = data.get("amount_xmr", "0")
-    
+
     await state.set_state(CreateChequeStates.confirm_cheque)
-    
+
     summary = i18n.t(
         I18nKeys.CHEQUE_CREATE_SUMMARY,
         rub=amount_rub,
         xmr=amount_xmr,
         desc=description,
     )
-    
+
     if isinstance(source, CallbackQuery):
         await message.edit_text(
             summary,
@@ -614,13 +637,13 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
     user_id = str(callback.from_user.id)
     lang = await get_user_language(storage, user_id, callback.from_user.language_code)
     i18n = I18n(lang)
-    
+
     data = await state.get_data()
     amount_rub = data.get("amount_rub", 0)
     amount_atomic = data.get("amount_atomic", 0)
     amount_xmr = data.get("amount_xmr", "0")
     description = data.get("description", "")
-    
+
     # Get user's wallet
     wallet = await storage.get_wallet(user_id)
     if wallet is None:
@@ -628,11 +651,22 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
         await state.clear()
         await callback.answer()
         return
-    
-    # Use current time as min_height approximation
-    # In production, this should come from the actual blockchain height
-    min_height = int(datetime.now(timezone.utc).timestamp())
-    
+
+    # Use actual blockchain height (with small reorg buffer) to filter incoming transfers.
+    settings = get_settings()
+    try:
+        async with MoneroWalletRPC(url=settings.monero_rpc_url) as rpc:
+            current_height = await rpc.get_current_height()
+    except Exception as e:
+        logger.error("monero_rpc_get_height_failed", user_id=user_id, error=str(e))
+        await callback.message.edit_text(i18n.t(I18nKeys.ERROR_GENERIC))
+        await state.clear()
+        await callback.answer()
+        return
+
+    reorg_buffer = 30
+    min_height = max(0, current_height - reorg_buffer)
+
     try:
         # Create cheque
         cheque = await storage.create_cheque(
@@ -644,12 +678,12 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
             min_height=min_height,
             description=description,
         )
-        
+
         await state.clear()
-        
+
         # Send success message
         await callback.message.edit_text(i18n.t(I18nKeys.CHEQUE_CREATE_SUCCESS))
-        
+
         # Generate and send QR code
         try:
             qr_bytes = generate_payment_qr(
@@ -657,13 +691,13 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
                 amount_xmr=amount_xmr,
                 tx_description=description or None,
             )
-            
+
             pay_instructions = i18n.t(
                 I18nKeys.CHEQUE_PAY_INSTRUCTIONS,
                 xmr=amount_xmr,
                 addr=wallet.monero_address,
             )
-            
+
             await callback.message.answer_photo(
                 photo=qr_bytes,
                 caption=i18n.t(I18nKeys.CHEQUE_QR_CAPTION) + "\n\n" + pay_instructions,
@@ -677,18 +711,19 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
                 f"<code>{wallet.monero_address}</code>",
                 parse_mode=ParseMode.HTML,
             )
-        
+
     except Exception as e:
         logger.error("cheque_creation_failed", user_id=user_id, error=str(e))
         await callback.message.edit_text(i18n.t(I18nKeys.ERROR_GENERIC))
         await state.clear()
-    
+
     await callback.answer()
 
 
 # =============================================================================
 # Bot Setup
 # =============================================================================
+
 
 def create_bot(token: str) -> Bot:
     """Create Bot instance."""
@@ -698,23 +733,23 @@ def create_bot(token: str) -> Bot:
 def create_dispatcher(storage: RedisStorage | None = None) -> Dispatcher:
     """Create Dispatcher with storage."""
     dp = Dispatcher()
-    
+
     # Provide storage to handlers via middleware/context
     if storage is None:
         storage = RedisStorage()
-    
+
     dp["storage"] = storage
     dp.include_router(router)
-    
+
     return dp
 
 
 async def setup_bot() -> tuple[Bot, Dispatcher]:
     """Setup bot and dispatcher with dependencies."""
     settings = get_settings()
-    
+
     bot = create_bot(settings.bot_token)
     storage = RedisStorage()
     dp = create_dispatcher(storage)
-    
+
     return bot, dp

@@ -1,10 +1,14 @@
-import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from xmr_cheque_bot.monero_rpc import MoneroWalletRPC
-from xmr_cheque_bot.payment_monitor import PaymentMonitor, Transfer, pick_match, status_from_transfer
+from xmr_cheque_bot.payment_monitor import (
+    PaymentMonitor,
+    Transfer,
+    pick_match,
+    status_from_transfer,
+)
 from xmr_cheque_bot.redis_schema import ChequeRecord, ChequeStatus, UserWallet
 
 
@@ -58,7 +62,7 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def mk_cheque(cid: str, user_id: str, amount: int, min_h: int) -> ChequeRecord:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return ChequeRecord(
         cheque_id=cid,
         user_id=user_id,

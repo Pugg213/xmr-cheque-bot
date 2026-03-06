@@ -1,0 +1,54 @@
+# Prometheus alert rules for XMR Cheque Bot
+
+groups:
+  - name: xmr-cheque-bot
+    rules:
+      # Container down alerts
+      - alert: XMRBotContainerDown
+        expr: up{job="cadvisor"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "XMR Bot container {{ $labels.name }} is down"
+          description: "Container {{ $labels.name }} has been down for more than 5 minutes"
+
+      # Disk space alerts
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ $labels.device }}"
+          description: "Disk usage is above 90% on {{ $labels.device }}"
+
+      # Memory alerts
+      - alert: HighMemoryUsage
+        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage in {{ $labels.name }}"
+          description: "Container {{ $labels.name }} is using more than 90% of its memory limit"
+
+      # monerod specific alerts
+      - alert: MoneroNotSyncing
+        expr: time() - monerod_last_block_timestamp > 1800
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Monero daemon not syncing"
+          description: "monerod hasn't received new blocks for over 30 minutes"
+
+      # Application health
+      - alert: BotNotResponding
+        expr: up{job="xmr-bot"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Telegram bot is not responding"
+          description: "Bot health check endpoint is failing"

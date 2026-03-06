@@ -11,7 +11,7 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - xmr-bot-net
+      - xmr-bot-internal
     restart: unless-stopped
 
   monerod:
@@ -32,6 +32,7 @@ services:
       - monero_data:/home/monero/.bitmonero
     networks:
       - xmr-bot-net
+      - xmr-bot-internal
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:38081/get_height"]
       interval: 30s
@@ -58,7 +59,7 @@ services:
       monerod:
         condition: service_healthy
     networks:
-      - xmr-bot-net
+      - xmr-bot-internal
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:38083/json_rpc", "-d", '{"jsonrpc":"2.0","id":"0","method":"get_version"}']
       interval: 10s
@@ -85,7 +86,7 @@ services:
       monero-wallet-rpc:
         condition: service_healthy
     networks:
-      - xmr-bot-net
+      - xmr-bot-internal
     restart: unless-stopped
 
 volumes:
@@ -97,5 +98,11 @@ volumes:
     driver: local
 
 networks:
+  # External network: monerod needs outbound connectivity for sync/peers.
   xmr-bot-net:
     driver: bridge
+
+  # Internal-only service network: isolates redis + wallet-rpc + app.
+  xmr-bot-internal:
+    driver: bridge
+    internal: true

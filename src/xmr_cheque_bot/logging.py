@@ -12,14 +12,14 @@ from xmr_cheque_bot.config import get_settings
 def configure_logging() -> None:
     """Configure structured logging for the application."""
     settings = get_settings()
-    
+
     # Configure standard library logging
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
         level=getattr(logging, settings.log_level),
     )
-    
+
     # Configure structlog
     structlog.configure(
         processors=[
@@ -39,7 +39,7 @@ def configure_logging() -> None:
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
-    
+
     # Suppress noisy third-party loggers
     logging.getLogger("aiogram").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)

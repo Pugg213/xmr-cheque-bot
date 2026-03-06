@@ -8,16 +8,15 @@ Tests:
 - Cheque limits
 """
 
-import pytest
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 # Import modules under test
 from xmr_cheque_bot.amount import (
-    ATOMIC_UNITS_PER_XMR,
-    MIN_TAIL,
     MAX_TAIL,
-    ComputedAmount,
+    MIN_TAIL,
     _atomic_to_display,
     atomic_to_xmr,
     compute_cheque_amount,
@@ -28,12 +27,11 @@ from xmr_cheque_bot.amount import (
 from xmr_cheque_bot.cheque_limits import (
     ChequeLimitError,
     check_cheque_creation_allowed,
-    count_active_cheques,
     get_active_statuses,
     is_status_active,
 )
+from xmr_cheque_bot.rates import RateCache, RateFetchError
 from xmr_cheque_bot.redis_schema import ChequeStatus
-from xmr_cheque_bot.rates import RateFetchError, RateCache, fetch_xmr_rub_rate
 from xmr_cheque_bot.uri_qr import (
     build_monero_uri,
     generate_payment_qr,
@@ -41,10 +39,10 @@ from xmr_cheque_bot.uri_qr import (
     get_qr_size_for_data,
 )
 
-
 # =============================================================================
 # Amount Computation Tests
 # =============================================================================
+
 
 class TestAmountComputation:
     """Tests for amount computation with Decimal precision."""
@@ -54,9 +52,9 @@ class TestAmountComputation:
         """Test basic amount computation with mocked rate."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("15000.00")  # 1 XMR = 15000 RUB
-            
+
             result = await compute_cheque_amount(1500)  # 1500 RUB = 0.1 XMR
-            
+
             assert result.amount_rub == 1500
             assert result.rate_xmr_rub == Decimal("15000.00")
             assert result.amount_atomic_expected > 0
@@ -69,9 +67,9 @@ class TestAmountComputation:
         """Test computation with explicit tail value."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("10000.00")
-            
+
             result = await compute_cheque_amount(1000, tail=1234)
-            
+
             assert result.tail == 1234
             assert result.amount_atomic_expected == result.base_atomic + 1234
 
@@ -80,9 +78,9 @@ class TestAmountComputation:
         """Test display string has exactly 12 decimal places."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("10000.00")
-            
+
             result = await compute_cheque_amount(1000)
-            
+
             # Should have exactly 12 decimal places
             assert "." in result.amount_xmr_display
             decimal_places = len(result.amount_xmr_display.split(".")[1])
@@ -93,15 +91,15 @@ class TestAmountComputation:
         """Test atomic math avoids float drift."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("12345.67")
-            
+
             result = await compute_cheque_amount(999)
-            
+
             # Verify we're using Decimal, not float
             assert isinstance(result.rate_xmr_rub, Decimal)
-            
+
             # Verify atomic amount is integer
             assert isinstance(result.amount_atomic_expected, int)
-            
+
             # Reconstruct and verify no drift
             reconstructed = atomic_to_xmr(result.amount_atomic_expected)
             reconstructed_atomic = xmr_to_atomic(reconstructed)
@@ -112,10 +110,10 @@ class TestAmountComputation:
         """Test that same inputs produce same outputs."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("20000.00")
-            
+
             result1 = await compute_cheque_amount(500, tail=100)
             result2 = await compute_cheque_amount(500, tail=100)
-            
+
             assert result1.amount_atomic_expected == result2.amount_atomic_expected
             assert result1.amount_xmr_display == result2.amount_xmr_display
             assert result1.base_atomic == result2.base_atomic
@@ -125,10 +123,10 @@ class TestAmountComputation:
         """Test that different tails create unique expected amounts."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("10000.00")
-            
+
             result1 = await compute_cheque_amount(1000, tail=1)
             result2 = await compute_cheque_amount(1000, tail=9999)
-            
+
             assert result1.amount_atomic_expected != result2.amount_atomic_expected
             assert result1.tail != result2.tail
 
@@ -137,7 +135,7 @@ class TestAmountComputation:
         """Test validation of negative or zero RUB amount."""
         with pytest.raises(ValueError, match="must be positive"):
             await compute_cheque_amount(0)
-        
+
         with pytest.raises(ValueError, match="must be positive"):
             await compute_cheque_amount(-100)
 
@@ -146,13 +144,13 @@ class TestAmountComputation:
         """Test validation of out-of-range tail values."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("10000.00")
-            
+
             with pytest.raises(ValueError, match="tail must be between"):
                 await compute_cheque_amount(1000, tail=0)
-            
+
             with pytest.raises(ValueError, match="tail must be between"):
                 await compute_cheque_amount(1000, tail=10000)
-            
+
             with pytest.raises(ValueError, match="tail must be between"):
                 await compute_cheque_amount(1000, tail=-1)
 
@@ -161,7 +159,7 @@ class TestAmountComputation:
         """Test that rate fetch errors are propagated."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.side_effect = RateFetchError("API unavailable")
-            
+
             with pytest.raises(RateFetchError, match="API unavailable"):
                 await compute_cheque_amount(1000)
 
@@ -251,6 +249,7 @@ class TestTailGeneration:
 # URI Builder Tests
 # =============================================================================
 
+
 class TestMoneroURI:
     """Tests for Monero URI formatting."""
 
@@ -263,29 +262,23 @@ class TestMoneroURI:
 
     def test_uri_with_amount(self):
         """Test URI with amount parameter."""
-        uri = build_monero_uri(
-            address="44AFFq5k...",
-            amount_xmr="0.123456789012"
-        )
+        uri = build_monero_uri(address="44AFFq5k...", amount_xmr="0.123456789012")
         assert "tx_amount=0.123456789012" in uri
 
     def test_uri_with_description(self):
         """Test URI with description (URL encoded)."""
         uri = build_monero_uri(
-            address="44AFFq5k...",
-            amount_xmr="1.0",
-            tx_description="Invoice #123"
+            address="44AFFq5k...", amount_xmr="1.0", tx_description="Invoice #123"
         )
         assert "tx_description=" in uri
         assert "Invoice" in uri or "Invoice+%23123" in uri
 
     def test_uri_with_message(self):
         """Test URI with message."""
-        uri = build_monero_uri(
-            address="44AFFq5k...",
-            tx_message="Payment for services"
+        uri = build_monero_uri(address="44AFFq5k...", tx_message="Payment for services")
+        assert (
+            "tx_message=Payment+for+services" in uri or "tx_message=Payment%20for%20services" in uri
         )
-        assert "tx_message=Payment+for+services" in uri or "tx_message=Payment%20for%20services" in uri
 
     def test_uri_all_params(self):
         """Test URI with all parameters."""
@@ -293,7 +286,7 @@ class TestMoneroURI:
             address="44AFFq5k...",
             amount_xmr="0.5",
             tx_description="Donation",
-            tx_message="Keep up the good work!"
+            tx_message="Keep up the good work!",
         )
         assert uri.startswith("monero:44AFFq5k...")
         assert "tx_amount=0.5" in uri
@@ -321,6 +314,7 @@ class TestMoneroURI:
 # QR Code Tests
 # =============================================================================
 
+
 class TestQRGeneration:
     """Tests for QR code generation."""
 
@@ -328,22 +322,22 @@ class TestQRGeneration:
         """Test QR generation returns PNG bytes."""
         data = "monero:44AFFq5k...?tx_amount=0.1"
         qr_bytes = generate_qr_code(data)
-        
+
         assert isinstance(qr_bytes, bytes)
         assert len(qr_bytes) > 0
         # PNG magic bytes
-        assert qr_bytes[:8] == b'\x89PNG\r\n\x1a\n'
+        assert qr_bytes[:8] == b"\x89PNG\r\n\x1a\n"
 
     def test_generate_qr_different_sizes(self):
         """Test QR generation with different sizes."""
         data = "test data"
-        
+
         size_256 = generate_qr_code(data, size=256)
         size_512 = generate_qr_code(data, size=512)
-        
+
         # Both should be valid PNGs
-        assert size_256[:8] == b'\x89PNG\r\n\x1a\n'
-        assert size_512[:8] == b'\x89PNG\r\n\x1a\n'
+        assert size_256[:8] == b"\x89PNG\r\n\x1a\n"
+        assert size_512[:8] == b"\x89PNG\r\n\x1a\n"
 
     def test_generate_qr_empty_data_raises(self):
         """Test empty data raises ValueError."""
@@ -353,23 +347,21 @@ class TestQRGeneration:
     def test_generate_payment_qr(self):
         """Test convenience function for payment QR."""
         qr_bytes = generate_payment_qr(
-            address="44AFFq5k...",
-            amount_xmr="0.123456789012",
-            tx_description="Test"
+            address="44AFFq5k...", amount_xmr="0.123456789012", tx_description="Test"
         )
-        
+
         assert isinstance(qr_bytes, bytes)
-        assert qr_bytes[:8] == b'\x89PNG\r\n\x1a\n'
+        assert qr_bytes[:8] == b"\x89PNG\r\n\x1a\n"
 
     def test_qr_size_for_data(self):
         """Test QR size recommendation."""
         # Short data
         assert get_qr_size_for_data("short") == 256
-        
+
         # Medium data (typical Monero URI)
         medium = "monero:" + "a" * 95 + "?tx_amount=0.123456789012"
         assert get_qr_size_for_data(medium) == 512
-        
+
         # Long data
         long_data = "a" * 300
         assert get_qr_size_for_data(long_data) == 768
@@ -379,6 +371,7 @@ class TestQRGeneration:
 # Rate Cache Tests
 # =============================================================================
 
+
 class TestRateCache:
     """Tests for rate caching mechanism."""
 
@@ -386,20 +379,21 @@ class TestRateCache:
         """Test cache stores and retrieves rates."""
         cache = RateCache(ttl_seconds=60)
         rate = Decimal("15000.50")
-        
+
         cache.set(rate)
         retrieved = cache.get()
-        
+
         assert retrieved == rate
 
     def test_cache_expires(self):
         """Test cache expires after TTL."""
         cache = RateCache(ttl_seconds=0.01)  # 10ms TTL
         cache.set(Decimal("15000.00"))
-        
+
         import time
+
         time.sleep(0.02)  # Wait for expiration
-        
+
         assert cache.get() is None
         assert not cache.is_valid()
 
@@ -407,9 +401,9 @@ class TestRateCache:
         """Test manual cache invalidation."""
         cache = RateCache()
         cache.set(Decimal("15000.00"))
-        
+
         cache.invalidate()
-        
+
         assert cache.get() is None
         assert not cache.is_valid()
 
@@ -418,6 +412,7 @@ class TestRateCache:
 # Cheque Limits Tests
 # =============================================================================
 
+
 class TestChequeLimits:
     """Tests for cheque creation limits."""
 
@@ -425,6 +420,7 @@ class TestChequeLimits:
     def mock_settings(self):
         """Mock settings for all tests in this class."""
         from xmr_cheque_bot import config
+
         mock_settings = MagicMock()
         mock_settings.max_active_cheques_per_user = 10
         mock_settings.cheque_ttl_seconds = 3600
@@ -435,21 +431,25 @@ class TestChequeLimits:
     @pytest.mark.asyncio
     async def test_check_cheque_creation_allowed_basic(self):
         """Test basic allowance check passes."""
-        with patch("xmr_cheque_bot.cheque_limits.count_active_cheques", new_callable=AsyncMock) as mock_count:
+        with patch(
+            "xmr_cheque_bot.cheque_limits.count_active_cheques", new_callable=AsyncMock
+        ) as mock_count:
             mock_count.return_value = 5  # Below limit of 10
-            
+
             result = await check_cheque_creation_allowed("123456")
             assert result is True
 
     @pytest.mark.asyncio
     async def test_cheque_limit_error_raised(self):
         """Test ChequeLimitError raised when at max."""
-        with patch("xmr_cheque_bot.cheque_limits.count_active_cheques", new_callable=AsyncMock) as mock_count:
+        with patch(
+            "xmr_cheque_bot.cheque_limits.count_active_cheques", new_callable=AsyncMock
+        ) as mock_count:
             mock_count.return_value = 10  # At limit
-            
+
             with pytest.raises(ChequeLimitError) as exc_info:
                 await check_cheque_creation_allowed("123456")
-            
+
             assert exc_info.value.user_id == "123456"
             assert exc_info.value.current_count == 10
             assert exc_info.value.max_allowed == 10
@@ -457,19 +457,21 @@ class TestChequeLimits:
     @pytest.mark.asyncio
     async def test_cheque_limit_error_message(self):
         """Test error message contains helpful info."""
-        with patch("xmr_cheque_bot.cheque_limits.count_active_cheques", new_callable=AsyncMock) as mock_count:
+        with patch(
+            "xmr_cheque_bot.cheque_limits.count_active_cheques", new_callable=AsyncMock
+        ) as mock_count:
             mock_count.return_value = 12  # Over limit
-            
+
             with pytest.raises(ChequeLimitError) as exc_info:
                 await check_cheque_creation_allowed("123456")
-            
+
             assert "Maximum" in str(exc_info.value)
             assert "10" in str(exc_info.value)
 
     def test_active_statuses(self):
         """Test active statuses are correctly identified."""
         active = get_active_statuses()
-        
+
         assert ChequeStatus.PENDING in active
         assert ChequeStatus.MEMPOOL in active
         assert ChequeStatus.CONFIRMING in active
@@ -490,6 +492,7 @@ class TestChequeLimits:
 # Integration Tests
 # =============================================================================
 
+
 class TestChequeCreationIntegration:
     """Integration tests for cheque creation flow."""
 
@@ -498,49 +501,49 @@ class TestChequeCreationIntegration:
         """Test complete flow: compute amount -> build URI -> generate QR."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("20000.00")
-            
+
             # Step 1: Compute amount
             amount = await compute_cheque_amount(1000)
-            
+
             # Step 2: Build URI
             uri = build_monero_uri(
                 address="44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uUNzHwJpYdhkRXdDQYFGAXCAw",
                 amount_xmr=amount.amount_xmr_display,
             )
-            
+
             # Step 3: Generate QR
             qr_bytes = generate_qr_code(uri)
-            
+
             # Verify chain
             assert amount.amount_atomic_expected > 0
             assert "monero:" in uri
             assert "tx_amount=" in uri
-            assert qr_bytes[:8] == b'\x89PNG\r\n\x1a\n'
+            assert qr_bytes[:8] == b"\x89PNG\r\n\x1a\n"
 
     @pytest.mark.asyncio
     async def test_amount_uniqueness_with_different_tails(self):
         """Test that different tails produce unique atomic amounts."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("10000.00")
-            
+
             amounts = []
             for tail in [1, 100, 1000, 5000, 9999]:
                 result = await compute_cheque_amount(500, tail=tail)
                 amounts.append(result.amount_atomic_expected)
-            
+
             # All amounts should be unique
             assert len(set(amounts)) == len(amounts)
 
-    @pytest.mark.asyncio  
+    @pytest.mark.asyncio
     async def test_display_amount_matches_atomic(self):
         """Test that display amount correctly represents atomic units."""
         with patch("xmr_cheque_bot.amount.fetch_xmr_rub_rate", new_callable=AsyncMock) as mock_rate:
             mock_rate.return_value = Decimal("15000.00")
-            
+
             result = await compute_cheque_amount(1500, tail=1234)
-            
+
             # Convert display back to atomic and verify
             display_decimal = Decimal(result.amount_xmr_display)
             reconstructed_atomic = xmr_to_atomic(display_decimal)
-            
+
             assert reconstructed_atomic == result.amount_atomic_expected

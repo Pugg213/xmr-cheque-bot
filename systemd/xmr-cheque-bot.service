@@ -1,0 +1,41 @@
+[Unit]
+Description=XMR Cheque Bot Production Deployment
+Documentation=https://github.com/Pugg213/xmr-cheque-bot
+Requires=docker.service
+After=docker.service network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Working directory
+WorkingDirectory=/opt/xmr-cheque-bot
+
+# Run as deploy user
+User=xmrbot
+Group=xmrbot
+
+# Environment
+Environment="COMPOSE_PROJECT_NAME=xmr-cheque-bot"
+Environment="DOCKER_CLIENT_TIMEOUT=120"
+Environment="COMPOSE_HTTP_TIMEOUT=120"
+
+# Compose files
+Environment="COMPOSE_FILE=docker-compose.yml:docker-compose.mainnet.yml:docker-compose.production.yml"
+
+# Start command
+ExecStartPre=-/usr/bin/docker compose pull
+ExecStart=/usr/bin/docker compose up -d
+
+# Stop command
+ExecStop=/usr/bin/docker compose down
+
+# Reload command
+ExecReload=/usr/bin/docker compose up -d
+
+# Timeout settings
+TimeoutStartSec=5min
+TimeoutStopSec=2min
+
+[Install]
+WantedBy=multi-user.target

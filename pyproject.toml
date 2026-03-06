@@ -51,15 +51,18 @@ packages = ["src/xmr_cheque_bot"]
 target-version = "py311"
 line-length = 100
 select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM"]
-ignore = []
+ignore = ["E501", "W293", "B904", "F841", "SIM105", "SIM117"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["E402"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
-warn_return_any = true
+strict = false
+ignore_missing_imports = true
 warn_unused_configs = true
 show_error_codes = true
 

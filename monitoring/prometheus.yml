@@ -1,0 +1,40 @@
+# Prometheus configuration for XMR Cheque Bot monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files:
+  - alert-rules.yml
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Docker container metrics (requires cadvisor)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    metric_relabel_configs:
+      - source_labels: [container_name]
+        target_label: instance
+
+  # monerod metrics (if metrics exporter available)
+  - job_name: 'monerod'
+    static_configs:
+      - targets: ['monerod:18081']
+    metrics_path: /get_info
+    scheme: http
+
+  # Custom application metrics (if implemented)
+  - job_name: 'xmr-bot'
+    static_configs:
+      - targets: ['app-bot:8080']
+    metrics_path: /metrics

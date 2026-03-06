@@ -9,9 +9,9 @@ No Telegram handlers here — notifications go through a Notifier interface.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import re
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Protocol
 
 import structlog
@@ -28,7 +28,12 @@ _WALLET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 
 def is_safe_wallet_filename(name: str) -> bool:
-    return bool(_WALLET_NAME_RE.fullmatch(name)) and ".." not in name and "/" not in name and "\\" not in name
+    return (
+        bool(_WALLET_NAME_RE.fullmatch(name))
+        and ".." not in name
+        and "/" not in name
+        and "\\" not in name
+    )
 
 
 @dataclass(frozen=True)
@@ -43,7 +48,9 @@ class Transfer:
 
 
 class Notifier(Protocol):
-    async def notify(self, user_id: str, message_key: str, payload: dict) -> None:  # pragma: no cover
+    async def notify(
+        self, user_id: str, message_key: str, payload: dict
+    ) -> None:  # pragma: no cover
         ...
 
 
@@ -180,7 +187,7 @@ class PaymentMonitor:
 
                 wallet_password = ""
                 if hasattr(self.storage, "decrypt_wallet_password"):
-                    wallet_password = await getattr(self.storage, "decrypt_wallet_password")(wallet)  # type: ignore[misc]
+                    wallet_password = await self.storage.decrypt_wallet_password(wallet)  # type: ignore[misc]
 
                 async with self._rpc_lock:
                     if not wallet.wallet_file_name:
@@ -189,10 +196,14 @@ class PaymentMonitor:
                     if not is_safe_wallet_filename(wallet.wallet_file_name):
                         logger.warning("wallet_file_name_invalid", user_id=user_id)
                         continue
-                    await self.rpc.open_wallet(filename=wallet.wallet_file_name, password=wallet_password)
+                    await self.rpc.open_wallet(
+                        filename=wallet.wallet_file_name, password=wallet_password
+                    )
                     try:
                         await self.rpc.refresh(start_height=min_h)
-                        raw = await self.rpc.get_incoming_transfers(min_height=min_h, include_pool=True)
+                        raw = await self.rpc.get_incoming_transfers(
+                            min_height=min_h, include_pool=True
+                        )
                     finally:
                         await self.rpc.close_wallet(autosave=True)
 
@@ -205,7 +216,11 @@ class PaymentMonitor:
                         continue
 
                     new_status = status_from_transfer(match, confirmations_final)
-                    if new_status == cheque.status and cheque.tx_hash == match.txid and cheque.confirmations == match.confirmations:
+                    if (
+                        new_status == cheque.status
+                        and cheque.tx_hash == match.txid
+                        and cheque.confirmations == match.confirmations
+                    ):
                         continue
 
                     cheque.tx_hash = match.txid
@@ -213,22 +228,32 @@ class PaymentMonitor:
                     cheque.confirmations = match.confirmations
                     cheque.status = new_status
                     if new_status == ChequeStatus.CONFIRMED and cheque.paid_at is None:
-                        cheque.paid_at = datetime.now(timezone.utc)
+                        cheque.paid_at = datetime.now(UTC)
 
                     await self.storage.save_cheque(cheque)
                     updated += 1
 
-                    if new_status in {ChequeStatus.CONFIRMED, ChequeStatus.EXPIRED, ChequeStatus.CANCELLED}:
+                    if new_status in {
+                        ChequeStatus.CONFIRMED,
+                        ChequeStatus.EXPIRED,
+                        ChequeStatus.CANCELLED,
+                    }:
                         await self.storage.remove_from_pending(cheque.cheque_id)
 
                     # Notifications (keys only; bot layer maps them to RU/EN)
                     if new_status == ChequeStatus.MEMPOOL:
-                        await self.notifier.notify(user_id, "payment.mempool", {"cheque_id": cheque.cheque_id})
+                        await self.notifier.notify(
+                            user_id, "payment.mempool", {"cheque_id": cheque.cheque_id}
+                        )
                     elif new_status == ChequeStatus.CONFIRMING:
                         await self.notifier.notify(
                             user_id,
                             "payment.confirming",
-                            {"cheque_id": cheque.cheque_id, "confirmations": cheque.confirmations, "final": confirmations_final},
+                            {
+                                "cheque_id": cheque.cheque_id,
+                                "confirmations": cheque.confirmations,
+                                "final": confirmations_final,
+                            },
                         )
                     elif new_status == ChequeStatus.CONFIRMED:
                         await self.notifier.notify(

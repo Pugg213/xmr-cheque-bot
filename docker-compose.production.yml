@@ -1,0 +1,191 @@
+# docker-compose.production.yml
+# Production overrides for XMR Cheque Bot
+# 
+# Usage:
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.mainnet.yml \
+#                  -f docker-compose.production.yml \
+#                  up -d
+#
+# Features:
+# - Resource limits for all services
+# - Separate bot and monitor services (scalable)
+# - Enhanced logging configuration
+# - Restart policies optimized for production
+
+services:
+  # Override monerod with resource limits
+  monerod:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    # Ensure monerod stays up
+    restart: always
+
+  # Override wallet-rpc with resource limits
+  monero-wallet-rpc:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+
+  # Override redis with memory limit
+  redis:
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+
+  # Split app into separate bot and monitor services for scaling
+  # Original 'app' service is disabled in production - use app-bot + app-monitor
+
+  app-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xmr-bot-app-bot
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONERO_RPC_URL=http://${WALLET_RPC_USER}:${WALLET_RPC_PASS}@monero-wallet-rpc:18083/json_rpc
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - VIEW_KEY_ENCRYPTION_KEY=${VIEW_KEY_ENCRYPTION_KEY}
+      - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
+      - APP_MODE=bot
+    depends_on:
+      redis:
+        condition: service_healthy
+      monero-wallet-rpc:
+        condition: service_healthy
+    networks:
+      - xmr-bot-internal
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+        labels: "service_name,environment"
+    restart: always
+    # Only one bot instance allowed (Telegram polling limitation)
+    # For zero-downtime deploys, use webhook mode (future enhancement)
+
+  app-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # No fixed container name - allows scaling
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONERO_RPC_URL=http://${WALLET_RPC_USER}:${WALLET_RPC_PASS}@monero-wallet-rpc:18083/json_rpc
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - VIEW_KEY_ENCRYPTION_KEY=${VIEW_KEY_ENCRYPTION_KEY}
+      - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
+      - APP_MODE=monitor
+    depends_on:
+      redis:
+        condition: service_healthy
+      monero-wallet-rpc:
+        condition: service_healthy
+    networks:
+      - xmr-bot-internal
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+        labels: "service_name,environment"
+    restart: always
+
+  # Optional: Prometheus monitoring (uncomment to enable)
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: xmr-bot-prometheus
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--web.console.libraries=/etc/prometheus/console_libraries'
+  #     - '--web.console.templates=/etc/prometheus/consoles'
+  #     - '--web.enable-lifecycle'
+  #   networks:
+  #     - xmr-bot-net
+  #   ports:
+  #     - "127.0.0.1:9090:9090"  # Localhost only
+  #   restart: unless-stopped
+
+  # Optional: Grafana dashboards (uncomment to enable)
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: xmr-bot-grafana
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+  #     - GF_USERS_ALLOW_SIGN_UP=false
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+  #   networks:
+  #     - xmr-bot-net
+  #   ports:
+  #     - "127.0.0.1:3000:3000"  # Localhost only, use SSH tunnel
+  #   restart: unless-stopped
+
+# Additional volumes for monitoring (uncomment if using prometheus/grafana)
+# volumes:
+#   prometheus_data:
+#     driver: local
+#   grafana_data:
+#     driver: local

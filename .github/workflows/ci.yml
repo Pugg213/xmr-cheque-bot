@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}-
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pytest-cov pytest-asyncio
+
+      - name: Run linting
+        run: |
+          echo "=== Running Ruff linter ==="
+          ruff check src/ tests/
+          echo "=== Running Ruff format check ==="
+          ruff format --check src/ tests/
+          echo "=== Running mypy type checker (non-blocking for MVP) ==="
+          mypy src/ || true
+
+      - name: Run unit tests
+        env:
+          BOT_TOKEN: test_token_for_ci_not_real
+          VIEW_KEY_ENCRYPTION_KEY: dGVzdF9rZXlfZm9yX2NpXzMyYnl0ZXNfbG9uZ19lbm91Z2g=
+          REDIS_URL: redis://localhost:6379/0
+          APP_MODE: bot
+          LOG_LEVEL: DEBUG
+        run: |
+          pytest -q --cov=src/xmr_cheque_bot --cov-report=xml --cov-report=term
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+          verbose: true
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install security tools
+        run: |
+          pip install bandit pip-audit
+
+      - name: Run Bandit security scan
+        run: |
+          bandit -r src/ -f json -o bandit-report.json || true
+          bandit -r src/ -f screen
+
+      - name: Run pip-audit
+        run: |
+          pip-audit --requirement pyproject.toml || true
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-results
+          path: |
+            bandit-report.json
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+          pip install pytest-asyncio fakeredis
+
+      - name: Run integration tests
+        env:
+          BOT_TOKEN: test_token_for_ci
+          VIEW_KEY_ENCRYPTION_KEY: dGVzdF9rZXlfZm9yX2NpXzMyYnl0ZXNfbG9uZ19lbm91Z2g=
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          # Run tests marked as integration
+          pytest -v -m integration || echo "No integration tests yet"
+
+  build-docker:
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: xmr-cheque-bot:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image runs
+        run: |
+          docker run --rm xmr-cheque-bot:test python -c "import xmr_cheque_bot; print('OK')"

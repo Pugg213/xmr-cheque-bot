@@ -3,14 +3,14 @@
 Supports Russian (ru) and English (en) languages.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 
 @dataclass(frozen=True)
 class I18nKeys:
     """All i18n keys used in the bot."""
-    
+
     # Common
     CANCEL = "common.cancel"
     BACK = "common.back"
@@ -18,12 +18,12 @@ class I18nKeys:
     ERROR = "common.error"
     LOADING = "common.loading"
     DONE = "common.done"
-    
+
     # Start / Language
     START_WELCOME = "start.welcome"
     START_SELECT_LANGUAGE = "start.select_language"
     LANGUAGE_SET = "language.set"
-    
+
     # Wallet binding
     WALLET_BIND_PROMPT = "wallet.bind.prompt"
     WALLET_BIND_INSTRUCTIONS = "wallet.bind.instructions"
@@ -35,7 +35,7 @@ class I18nKeys:
     WALLET_BIND_INVALID_VIEW_KEY = "wallet.bind.invalid_view_key"
     WALLET_BIND_ALREADY_BOUND = "wallet.bind.already_bound"
     WALLET_BIND_RATE_LIMIT = "wallet.bind.rate_limit"
-    
+
     # Wallet-viewkey safety copy (CRITICAL SECURITY NOTICE)
     WALLET_VIEWKEY_WARNING_TITLE = "wallet.viewkey.warning_title"
     WALLET_VIEWKEY_WARNING_TEXT = "wallet.viewkey.warning_text"
@@ -43,7 +43,7 @@ class I18nKeys:
     WALLET_VIEWKEY_BACKUP_TITLE = "wallet.viewkey.backup_title"
     WALLET_VIEWKEY_BACKUP_TEXT = "wallet.viewkey.backup_text"
     WALLET_VIEWKEY_NEVER_SHARE = "wallet.viewkey.never_share"
-    
+
     # Create cheque
     CHEQUE_CREATE_PROMPT = "cheque.create.prompt"
     CHEQUE_CREATE_ENTER_AMOUNT = "cheque.create.enter_amount"
@@ -53,7 +53,7 @@ class I18nKeys:
     CHEQUE_CREATE_RATE_LIMIT = "cheque.create.rate_limit"
     CHEQUE_CREATE_MAX_ACTIVE = "cheque.create.max_active"
     CHEQUE_CREATE_INVALID_AMOUNT = "cheque.create.invalid_amount"
-    
+
     # Cheque display
     CHEQUE_QR_CAPTION = "cheque.qr_caption"
     CHEQUE_PAY_INSTRUCTIONS = "cheque.pay_instructions"
@@ -63,7 +63,7 @@ class I18nKeys:
     CHEQUE_EXPIRES_AT = "cheque.expires_at"
     CHEQUE_STATUS = "cheque.status"
     CHEQUE_DESCRIPTION = "cheque.description"
-    
+
     # Cheque status values
     CHEQUE_STATUS_PENDING = "cheque.status.pending"
     CHEQUE_STATUS_MEMPOOL = "cheque.status.mempool"
@@ -71,7 +71,7 @@ class I18nKeys:
     CHEQUE_STATUS_CONFIRMED = "cheque.status.confirmed"
     CHEQUE_STATUS_EXPIRED = "cheque.status.expired"
     CHEQUE_STATUS_CANCELLED = "cheque.status.cancelled"
-    
+
     # My cheques
     CHEQUE_LIST_EMPTY = "cheque.list.empty"
     CHEQUE_LIST_TITLE = "cheque.list.title"
@@ -80,12 +80,12 @@ class I18nKeys:
     CHEQUE_CANCEL_CONFIRM = "cheque.cancel.confirm"
     CHEQUE_CANCEL_SUCCESS = "cheque.cancel.success"
     CHEQUE_CANCEL_INVALID_STATE = "cheque.cancel.invalid_state"
-    
+
     # Payment notifications (used by payment_monitor)
     PAYMENT_MEMPOOL = "payment.mempool"
     PAYMENT_CONFIRMING = "payment.confirming"
     PAYMENT_CONFIRMED = "payment.confirmed"
-    
+
     # Settings
     SETTINGS_TITLE = "settings.title"
     SETTINGS_LANGUAGE = "settings.language"
@@ -93,12 +93,12 @@ class I18nKeys:
     SETTINGS_DELETE_DATA_CONFIRM = "settings.delete_data_confirm"
     SETTINGS_DELETE_DATA_SUCCESS = "settings.delete_data_success"
     SETTINGS_DELETE_DATA_CANCELLED = "settings.delete_data_cancelled"
-    
+
     # Delete data warnings
     DELETE_DATA_WARNING_TITLE = "delete_data.warning_title"
     DELETE_DATA_WARNING_TEXT = "delete_data.warning_text"
     DELETE_DATA_CONFIRM_BUTTON = "delete_data.confirm_button"
-    
+
     # Errors
     ERROR_GENERIC = "error.generic"
     ERROR_NOT_IMPLEMENTED = "error.not_implemented"
@@ -117,12 +117,10 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.ERROR: "❌ Error",
         I18nKeys.LOADING: "⏳ Loading...",
         I18nKeys.DONE: "✅ Done",
-        
         # Start
         I18nKeys.START_WELCOME: "Welcome to XMR Cheque Bot! 🎫\n\nI help you create Monero payment cheques — shareable payment requests with unique amounts for easy tracking.",
         I18nKeys.START_SELECT_LANGUAGE: "Please select your language:",
         I18nKeys.LANGUAGE_SET: "Language set to English 🇬🇧",
-        
         # Wallet binding
         I18nKeys.WALLET_BIND_PROMPT: "To create cheques, you need to bind your Monero wallet.",
         I18nKeys.WALLET_BIND_INSTRUCTIONS: lambda: (
@@ -138,13 +136,14 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         ),
         I18nKeys.WALLET_BIND_ENTER_ADDRESS: "Please send your Monero address (starts with 4 or 8):",
         I18nKeys.WALLET_BIND_ENTER_VIEW_KEY: "Now please send your private view key (64 hex characters):",
-        I18nKeys.WALLET_BIND_CONFIRMATION: lambda address: f"Please confirm:\n\nAddress: <code>{address[:16]}...{address[-8:]}</code>\n\nIs this correct?",
+        I18nKeys.WALLET_BIND_CONFIRMATION: lambda address: (
+            f"Please confirm:\n\nAddress: <code>{address[:16]}...{address[-8:]}</code>\n\nIs this correct?"
+        ),
         I18nKeys.WALLET_BIND_SUCCESS: "✅ Wallet bound successfully!\n\nYou can now create cheques.",
         I18nKeys.WALLET_BIND_INVALID_ADDRESS: "❌ Invalid Monero address. Please check and try again.",
         I18nKeys.WALLET_BIND_INVALID_VIEW_KEY: "❌ Invalid view key. It must be 64 hexadecimal characters.",
         I18nKeys.WALLET_BIND_ALREADY_BOUND: "You already have a wallet bound. Use /settings to manage your data.",
         I18nKeys.WALLET_BIND_RATE_LIMIT: "⏳ Please wait a bit before binding another wallet.",
-        
         # Wallet-viewkey safety copy (CRITICAL)
         I18nKeys.WALLET_VIEWKEY_WARNING_TITLE: "🔐 <b>Security Warning</b>",
         I18nKeys.WALLET_VIEWKEY_WARNING_TEXT: (
@@ -165,7 +164,6 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
             "Without these, you cannot recover your wallet!"
         ),
         I18nKeys.WALLET_VIEWKEY_NEVER_SHARE: "⚠️ Never share your spend key or seed phrase with anyone!",
-        
         # Create cheque
         I18nKeys.CHEQUE_CREATE_PROMPT: "Let's create a new cheque.",
         I18nKeys.CHEQUE_CREATE_ENTER_AMOUNT: "Enter the amount in Russian Rubles (RUB):\n\nExample: 1000",
@@ -173,20 +171,16 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.CHEQUE_CREATE_SUMMARY: lambda rub, xmr, desc: (
             f"📋 <b>Cheque Summary</b>\n\n"
             f"Amount: <b>{rub} RUB</b>\n"
-            f"≈ {xmr} XMR\n"
-            f"{f'Note: {desc}\\n' if desc else ''}"
-            f"\nCreate this cheque?"
+            f"≈ {xmr} XMR\n" + (f"Note: {desc}\n" if desc else "") + "\nCreate this cheque?"
         ),
         I18nKeys.CHEQUE_CREATE_SUCCESS: "✅ Cheque created!\n\nShare the QR code or the address below with the payer.",
         I18nKeys.CHEQUE_CREATE_RATE_LIMIT: "⏳ Please wait before creating another cheque.",
         I18nKeys.CHEQUE_CREATE_MAX_ACTIVE: "❌ You have too many active cheques. Cancel some or wait for them to complete.",
         I18nKeys.CHEQUE_CREATE_INVALID_AMOUNT: "❌ Invalid amount. Please enter a number between 100 and 1,000,000 RUB.",
-        
         # Cheque display
         I18nKeys.CHEQUE_QR_CAPTION: "Scan to pay with Monero",
         I18nKeys.CHEQUE_PAY_INSTRUCTIONS: lambda xmr, addr: (
-            f"Send exactly <code>{xmr}</code> XMR to:\n"
-            f"<code>{addr}</code>"
+            f"Send exactly <code>{xmr}</code> XMR to:\n<code>{addr}</code>"
         ),
         I18nKeys.CHEQUE_AMOUNT_RUB: "Amount (RUB)",
         I18nKeys.CHEQUE_AMOUNT_XMR: "Amount (XMR)",
@@ -194,7 +188,6 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.CHEQUE_EXPIRES_AT: "Expires",
         I18nKeys.CHEQUE_STATUS: "Status",
         I18nKeys.CHEQUE_DESCRIPTION: "Description",
-        
         # Status values
         I18nKeys.CHEQUE_STATUS_PENDING: "⏳ Pending",
         I18nKeys.CHEQUE_STATUS_MEMPOOL: "🌐 In Mempool",
@@ -202,7 +195,6 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.CHEQUE_STATUS_CONFIRMED: "✅ Confirmed",
         I18nKeys.CHEQUE_STATUS_EXPIRED: "❌ Expired",
         I18nKeys.CHEQUE_STATUS_CANCELLED: "🚫 Cancelled",
-        
         # My cheques
         I18nKeys.CHEQUE_LIST_EMPTY: "You have no cheques. Create one with /create",
         I18nKeys.CHEQUE_LIST_TITLE: "📋 Your Cheques",
@@ -211,12 +203,16 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.CHEQUE_CANCEL_CONFIRM: "Are you sure you want to cancel this cheque?",
         I18nKeys.CHEQUE_CANCEL_SUCCESS: "✅ Cheque cancelled.",
         I18nKeys.CHEQUE_CANCEL_INVALID_STATE: "❌ Can only cancel pending cheques.",
-        
         # Payment notifications
-        I18nKeys.PAYMENT_MEMPOOL: lambda cid: f"💸 Payment detected for cheque <code>{cid[:8]}</code>! Waiting for confirmations...",
-        I18nKeys.PAYMENT_CONFIRMING: lambda cid, conf, final: f"⏳ Cheque <code>{cid[:8]}</code>: {conf}/{final} confirmations...",
-        I18nKeys.PAYMENT_CONFIRMED: lambda cid: f"✅ Cheque <code>{cid[:8]}</code> fully confirmed! Payment complete.",
-        
+        I18nKeys.PAYMENT_MEMPOOL: lambda cid: (
+            f"💸 Payment detected for cheque <code>{cid[:8]}</code>! Waiting for confirmations..."
+        ),
+        I18nKeys.PAYMENT_CONFIRMING: lambda cid, conf, final: (
+            f"⏳ Cheque <code>{cid[:8]}</code>: {conf}/{final} confirmations..."
+        ),
+        I18nKeys.PAYMENT_CONFIRMED: lambda cid: (
+            f"✅ Cheque <code>{cid[:8]}</code> fully confirmed! Payment complete."
+        ),
         # Settings
         I18nKeys.SETTINGS_TITLE: "⚙️ Settings",
         I18nKeys.SETTINGS_LANGUAGE: "🌐 Language",
@@ -224,7 +220,6 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.SETTINGS_DELETE_DATA_CONFIRM: "⚠️ This will delete all your data including wallet info and cheques. Confirm?",
         I18nKeys.SETTINGS_DELETE_DATA_SUCCESS: "✅ All your data has been deleted.",
         I18nKeys.SETTINGS_DELETE_DATA_CANCELLED: "Deletion cancelled.",
-        
         # Delete data warnings
         I18nKeys.DELETE_DATA_WARNING_TITLE: "⚠️ <b>Warning: Data Deletion</b>",
         I18nKeys.DELETE_DATA_WARNING_TEXT: (
@@ -236,7 +231,6 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
             "Your actual Monero funds are safe in your wallet."
         ),
         I18nKeys.DELETE_DATA_CONFIRM_BUTTON: "🗑 Yes, delete everything",
-        
         # Errors
         I18nKeys.ERROR_GENERIC: "❌ Something went wrong. Please try again.",
         I18nKeys.ERROR_NOT_IMPLEMENTED: "🚧 This feature is not yet implemented.",
@@ -252,12 +246,10 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.ERROR: "❌ Ошибка",
         I18nKeys.LOADING: "⏳ Загрузка...",
         I18nKeys.DONE: "✅ Готово",
-        
         # Start
         I18nKeys.START_WELCOME: "Добро пожаловать в XMR Cheque Bot! 🎫\n\nЯ помогаю создавать чеки на оплату Monero — это запросы на оплату с уникальными суммами для удобного отслеживания.",
         I18nKeys.START_SELECT_LANGUAGE: "Пожалуйста, выберите язык:",
         I18nKeys.LANGUAGE_SET: "Язык изменён на русский 🇷🇺",
-        
         # Wallet binding
         I18nKeys.WALLET_BIND_PROMPT: "Для создания чеков нужно привязать Monero-кошелёк.",
         I18nKeys.WALLET_BIND_INSTRUCTIONS: lambda: (
@@ -273,13 +265,14 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         ),
         I18nKeys.WALLET_BIND_ENTER_ADDRESS: "Отправьте ваш Monero-адрес (начинается с 4 или 8):",
         I18nKeys.WALLET_BIND_ENTER_VIEW_KEY: "Теперь отправьте ваш приватный ключ просмотра (64 шестнадцатеричных символа):",
-        I18nKeys.WALLET_BIND_CONFIRMATION: lambda address: f"Пожалуйста, подтвердите:\n\nАдрес: <code>{address[:16]}...{address[-8:]}</code>\n\nВсё верно?",
+        I18nKeys.WALLET_BIND_CONFIRMATION: lambda address: (
+            f"Пожалуйста, подтвердите:\n\nАдрес: <code>{address[:16]}...{address[-8:]}</code>\n\nВсё верно?"
+        ),
         I18nKeys.WALLET_BIND_SUCCESS: "✅ Кошелёк успешно привязан!\n\nТеперь можно создавать чеки.",
         I18nKeys.WALLET_BIND_INVALID_ADDRESS: "❌ Неверный Monero-адрес. Проверьте и попробуйте снова.",
         I18nKeys.WALLET_BIND_INVALID_VIEW_KEY: "❌ Неверный ключ просмотра. Он должен содержать 64 шестнадцатеричных символа.",
         I18nKeys.WALLET_BIND_ALREADY_BOUND: "У вас уже привязан кошелёк. Используйте /settings для управления данными.",
         I18nKeys.WALLET_BIND_RATE_LIMIT: "⏳ Пожалуйста, подождите перед привязкой другого кошелька.",
-        
         # Wallet-viewkey safety copy (CRITICAL)
         I18nKeys.WALLET_VIEWKEY_WARNING_TITLE: "🔐 <b>Предупреждение безопасности</b>",
         I18nKeys.WALLET_VIEWKEY_WARNING_TEXT: (
@@ -300,7 +293,6 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
             "Без них вы не сможете восстановить кошелёк!"
         ),
         I18nKeys.WALLET_VIEWKEY_NEVER_SHARE: "⚠️ Никогда никому не сообщайте ключ траты и сид-фразу!",
-        
         # Create cheque
         I18nKeys.CHEQUE_CREATE_PROMPT: "Создадим новый чек.",
         I18nKeys.CHEQUE_CREATE_ENTER_AMOUNT: "Введите сумму в российских рублях (₽):\n\nПример: 1000",
@@ -308,20 +300,16 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.CHEQUE_CREATE_SUMMARY: lambda rub, xmr, desc: (
             f"📋 <b>Сводка по чеку</b>\n\n"
             f"Сумма: <b>{rub} ₽</b>\n"
-            f"≈ {xmr} XMR\n"
-            f"{f'Примечание: {desc}\\n' if desc else ''}"
-            f"\nСоздать этот чек?"
+            f"≈ {xmr} XMR\n" + (f"Примечание: {desc}\n" if desc else "") + "\nСоздать этот чек?"
         ),
         I18nKeys.CHEQUE_CREATE_SUCCESS: "✅ Чек создан!\n\nПоделитесь QR-кодом или адресом ниже с плательщиком.",
         I18nKeys.CHEQUE_CREATE_RATE_LIMIT: "⏳ Пожалуйста, подождите перед созданием следующего чека.",
         I18nKeys.CHEQUE_CREATE_MAX_ACTIVE: "❌ У вас слишком много активных чеков. Отмените некоторые или дождитесь завершения.",
         I18nKeys.CHEQUE_CREATE_INVALID_AMOUNT: "❌ Неверная сумма. Введите число от 100 до 1 000 000 ₽.",
-        
         # Cheque display
         I18nKeys.CHEQUE_QR_CAPTION: "Отсканируйте для оплаты Monero",
         I18nKeys.CHEQUE_PAY_INSTRUCTIONS: lambda xmr, addr: (
-            f"Отправьте ровно <code>{xmr}</code> XMR на:\n"
-            f"<code>{addr}</code>"
+            f"Отправьте ровно <code>{xmr}</code> XMR на:\n<code>{addr}</code>"
         ),
         I18nKeys.CHEQUE_AMOUNT_RUB: "Сумма (₽)",
         I18nKeys.CHEQUE_AMOUNT_XMR: "Сумма (XMR)",
@@ -329,7 +317,6 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.CHEQUE_EXPIRES_AT: "Истекает",
         I18nKeys.CHEQUE_STATUS: "Статус",
         I18nKeys.CHEQUE_DESCRIPTION: "Описание",
-        
         # Status values
         I18nKeys.CHEQUE_STATUS_PENDING: "⏳ Ожидает",
         I18nKeys.CHEQUE_STATUS_MEMPOOL: "🌐 В мемпуле",
@@ -337,7 +324,6 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.CHEQUE_STATUS_CONFIRMED: "✅ Подтверждён",
         I18nKeys.CHEQUE_STATUS_EXPIRED: "❌ Истёк",
         I18nKeys.CHEQUE_STATUS_CANCELLED: "🚫 Отменён",
-        
         # My cheques
         I18nKeys.CHEQUE_LIST_EMPTY: "У вас нет чеков. Создайте с помощью /create",
         I18nKeys.CHEQUE_LIST_TITLE: "📋 Ваши чеки",
@@ -346,12 +332,16 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.CHEQUE_CANCEL_CONFIRM: "Вы уверены, что хотите отменить этот чек?",
         I18nKeys.CHEQUE_CANCEL_SUCCESS: "✅ Чек отменён.",
         I18nKeys.CHEQUE_CANCEL_INVALID_STATE: "❌ Можно отменять только ожидающие чеки.",
-        
         # Payment notifications
-        I18nKeys.PAYMENT_MEMPOOL: lambda cid: f"💸 Обнаружен платёж по чеку <code>{cid[:8]}</code>! Ожидаем подтверждений...",
-        I18nKeys.PAYMENT_CONFIRMING: lambda cid, conf, final: f"⏳ Чек <code>{cid[:8]}</code>: {conf}/{final} подтверждений...",
-        I18nKeys.PAYMENT_CONFIRMED: lambda cid: f"✅ Чек <code>{cid[:8]}</code> полностью подтверждён! Оплата завершена.",
-        
+        I18nKeys.PAYMENT_MEMPOOL: lambda cid: (
+            f"💸 Обнаружен платёж по чеку <code>{cid[:8]}</code>! Ожидаем подтверждений..."
+        ),
+        I18nKeys.PAYMENT_CONFIRMING: lambda cid, conf, final: (
+            f"⏳ Чек <code>{cid[:8]}</code>: {conf}/{final} подтверждений..."
+        ),
+        I18nKeys.PAYMENT_CONFIRMED: lambda cid: (
+            f"✅ Чек <code>{cid[:8]}</code> полностью подтверждён! Оплата завершена."
+        ),
         # Settings
         I18nKeys.SETTINGS_TITLE: "⚙️ Настройки",
         I18nKeys.SETTINGS_LANGUAGE: "🌐 Язык",
@@ -359,7 +349,6 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.SETTINGS_DELETE_DATA_CONFIRM: "⚠️ Это удалит все ваши данные, включая кошелёк и чеки. Подтвердить?",
         I18nKeys.SETTINGS_DELETE_DATA_SUCCESS: "✅ Все ваши данные удалены.",
         I18nKeys.SETTINGS_DELETE_DATA_CANCELLED: "Удаление отменено.",
-        
         # Delete data warnings
         I18nKeys.DELETE_DATA_WARNING_TITLE: "⚠️ <b>Внимание: удаление данных</b>",
         I18nKeys.DELETE_DATA_WARNING_TEXT: (
@@ -371,49 +360,48 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
             "Ваши реальные средства в Monero останутся в кошельке."
         ),
         I18nKeys.DELETE_DATA_CONFIRM_BUTTON: "🗑 Да, удалить всё",
-        
         # Errors
         I18nKeys.ERROR_GENERIC: "❌ Что-то пошло не так. Попробуйте снова.",
         I18nKeys.ERROR_NOT_IMPLEMENTED: "🚧 Эта функция пока не реализована.",
         I18nKeys.ERROR_WALLET_NOT_BOUND: "❌ Кошелёк не привязан. Используйте /bind для привязки кошелька.",
         I18nKeys.ERROR_CHEQUE_NOT_FOUND: "❌ Чек не найден.",
         I18nKeys.ERROR_INVALID_INPUT: "❌ Неверный ввод. Попробуйте снова.",
-    }
+    },
 }
 
 
 def get_text(key: str, lang: str = "en", **kwargs) -> str:
     """Get translated text for a key.
-    
+
     Args:
         key: The i18n key
         lang: Language code ('en' or 'ru')
         **kwargs: Format arguments for lambda translations
-    
+
     Returns:
         Translated text string
-    
+
     Example:
         >>> get_text(I18nKeys.START_WELCOME, "en")
         'Welcome to XMR Cheque Bot!...'
-        
+
         >>> get_text(I18nKeys.PAYMENT_CONFIRMED, "ru", cid="abc123")
         '✅ Чек abc123 полностью подтверждён!...'
     """
     # Default to English if language not found
     translations = TRANSLATIONS.get(lang, TRANSLATIONS["en"])
-    
+
     # Get the translation
     value = translations.get(key)
-    
+
     # Fallback to English if key not found
     if value is None and lang != "en":
         value = TRANSLATIONS["en"].get(key)
-    
+
     # Return key itself if not found anywhere
     if value is None:
         return key
-    
+
     # Call if it's a lambda/function
     if callable(value):
         try:
@@ -424,17 +412,17 @@ def get_text(key: str, lang: str = "en", **kwargs) -> str:
                 return value()
             except TypeError:
                 return key
-    
+
     return str(value)
 
 
 def get_status_text(status: str, lang: str = "en") -> str:
     """Get localized status text.
-    
+
     Args:
         status: Status string (pending, mempool, etc.)
         lang: Language code
-    
+
     Returns:
         Localized status text with emoji
     """
@@ -452,19 +440,19 @@ def get_status_text(status: str, lang: str = "en") -> str:
 
 class I18n:
     """Convenience class for language-aware text retrieval."""
-    
+
     def __init__(self, lang: str = "en"):
         """Initialize with language.
-        
+
         Args:
             lang: Language code ('en' or 'ru')
         """
         self.lang = lang if lang in TRANSLATIONS else "en"
-    
+
     def t(self, key: str, **kwargs) -> str:
         """Get translated text."""
         return get_text(key, self.lang, **kwargs)
-    
+
     def status(self, status: str) -> str:
         """Get status text."""
         return get_status_text(status, self.lang)
@@ -472,19 +460,19 @@ class I18n:
 
 def get_language_from_telegram_code(lang_code: str | None) -> str:
     """Map Telegram language code to bot language.
-    
+
     Args:
         lang_code: Telegram user language code (e.g., 'ru', 'en')
-    
+
     Returns:
         Bot language code ('en' or 'ru')
     """
     if lang_code is None:
         return "en"
-    
+
     lang_code = lang_code.lower().split("-")[0]  # Handle 'en-US' -> 'en'
-    
+
     if lang_code == "ru":
         return "ru"
-    
+
     return "en"

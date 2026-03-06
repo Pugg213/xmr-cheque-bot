@@ -33,6 +33,7 @@ class RateCache:
         if self._rate is None:
             return False
         import time
+
         return time.time() - self._timestamp < self._ttl
 
     def get(self) -> Decimal | None:
@@ -44,6 +45,7 @@ class RateCache:
     def set(self, rate: Decimal) -> None:
         """Store new rate in cache."""
         import time
+
         self._rate = rate
         self._timestamp = time.time()
 
@@ -59,7 +61,7 @@ _rate_cache = RateCache()
 
 def _get_coingecko_url(api_key: str | None = None) -> str:
     """Build CoinGecko API URL with optional API key.
-    
+
     CoinGecko has two endpoints:
     - Public API (no key): api.coingecko.com (rate limited)
     - Pro API (with key): pro-api.coingecko.com
@@ -84,16 +86,16 @@ async def fetch_xmr_rub_rate(
     force_refresh: bool = False,
 ) -> Decimal:
     """Fetch XMR/RUB exchange rate from CoinGecko with caching.
-    
+
     Args:
         force_refresh: Ignore cache and fetch fresh rate
-    
+
     Returns:
         Current XMR/RUB rate as Decimal
-    
+
     Raises:
         RateFetchError: If rate cannot be fetched from API
-    
+
     Note:
         - Uses 60s in-memory cache
         - Works without API key (uses public endpoint)
@@ -154,7 +156,7 @@ async def fetch_xmr_rub_rate(
 
                 # Convert to Decimal for precision
                 rate_decimal = Decimal(str(rate))
-                
+
                 logger.info(
                     "rate_fetched",
                     rate=str(rate_decimal),
@@ -184,12 +186,13 @@ async def fetch_xmr_rub_rate(
 
 class RateFetchError(Exception):
     """Error fetching exchange rate."""
+
     pass
 
 
 def invalidate_rate_cache() -> None:
     """Manually invalidate the rate cache.
-    
+
     Useful for testing or when immediate refresh is needed.
     """
     global _rate_cache
