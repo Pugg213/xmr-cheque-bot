@@ -415,6 +415,10 @@ class RedisStorage:
         if cheque is None or cheque.user_id != user_id:
             return False
 
+        # Safety: don't allow deleting active cheques (payer may still send funds).
+        if not cheque.is_final():
+            raise StorageError("Cannot delete active cheque; cancel it first")
+
         r = await self._get_redis()
 
         # Remove the cheque record

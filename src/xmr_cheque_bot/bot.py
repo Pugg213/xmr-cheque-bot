@@ -464,7 +464,19 @@ async def cmd_delete_cheque(message: Message, storage: RedisStorage) -> None:
         await message.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), reply_markup=build_main_reply_keyboard())
         return
 
-    ok = await storage.delete_cheque(user_id=user_id, cheque_id=cheque_id)
+    try:
+        ok = await storage.delete_cheque(user_id=user_id, cheque_id=cheque_id)
+    except StorageError:
+        await message.answer(
+            (
+                "Сначала отмените активный чек: /cancel <id> (после этого можно /delete)."
+                if lang == "ru"
+                else "Cancel the active cheque first: /cancel <id> (then you can /delete)."
+            ),
+            reply_markup=build_main_reply_keyboard(),
+        )
+        return
+
     if not ok:
         await message.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), reply_markup=build_main_reply_keyboard())
         return
