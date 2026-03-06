@@ -367,7 +367,7 @@ async def cmd_mycheques(message: Message, storage: RedisStorage) -> None:
         lines.append(line)
 
     lines.append("")
-    lines.append("Управление: /cheque <id> /cancel <id> /delete <id>")
+    lines.append("Управление: /cheque ID /cancel ID /delete ID")
 
     await message.answer(
         "\n".join(lines),
@@ -385,7 +385,7 @@ async def cmd_cheque_details(message: Message, storage: RedisStorage) -> None:
 
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer("Usage: /cheque <id>", reply_markup=build_main_reply_keyboard())
+        await message.answer("Usage: /cheque ID", reply_markup=build_main_reply_keyboard())
         return
 
     cheque_id = await resolve_user_cheque_id(storage, user_id, parts[1])
@@ -448,7 +448,7 @@ async def cmd_cancel_cheque(message: Message, storage: RedisStorage) -> None:
 
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer("Usage: /cancel <id>", reply_markup=build_main_reply_keyboard())
+        await message.answer("Usage: /cancel ID", reply_markup=build_main_reply_keyboard())
         return
 
     cheque_id = await resolve_user_cheque_id(storage, user_id, parts[1])
@@ -477,7 +477,7 @@ async def cmd_delete_cheque(message: Message, storage: RedisStorage) -> None:
 
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer("Usage: /delete <id>", reply_markup=build_main_reply_keyboard())
+        await message.answer("Usage: /delete ID", reply_markup=build_main_reply_keyboard())
         return
 
     cheque_id = await resolve_user_cheque_id(storage, user_id, parts[1])
@@ -490,9 +490,9 @@ async def cmd_delete_cheque(message: Message, storage: RedisStorage) -> None:
     except StorageError:
         await message.answer(
             (
-                "Сначала отмените активный чек: /cancel <id> (после этого можно /delete)."
+                "Сначала отмените активный чек: /cancel ID (после этого можно /delete)."
                 if lang == "ru"
-                else "Cancel the active cheque first: /cancel <id> (then you can /delete)."
+                else "Cancel the active cheque first: /cancel ID (then you can /delete)."
             ),
             reply_markup=build_main_reply_keyboard(),
         )
