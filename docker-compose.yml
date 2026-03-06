@@ -59,7 +59,7 @@ services:
     networks:
       - xmr-bot-internal
     healthcheck:
-      test: ["CMD", "curl", "-f", "-u", "${WALLET_RPC_USER}:${WALLET_RPC_PASS}", "http://localhost:38083/json_rpc", "-d", '{"jsonrpc":"2.0","id":"0","method":"get_version"}']
+      test: ["CMD", "curl", "-f", "--digest", "-u", "${WALLET_RPC_USER}:${WALLET_RPC_PASS}", "http://localhost:38083/json_rpc", "-d", '{"jsonrpc":"2.0","id":"0","method":"get_version"}']
       interval: 10s
       timeout: 5s
       retries: 5

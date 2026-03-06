@@ -1,6 +1,10 @@
-"""Async Monero wallet RPC client using httpx."""
+"""Async Monero wallet RPC client using httpx.
+
+Note: `monero-wallet-rpc --rpc-login` uses HTTP Digest auth.
+"""
 
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -36,10 +40,22 @@ class MoneroWalletRPC:
             password: HTTP Basic Auth password (if required)
             timeout: Request timeout in seconds
         """
+        # Support URLs with embedded credentials: http://user:pass@host:port/json_rpc
+        parsed = urlsplit(url)
+        if parsed.username or parsed.password:
+            username = parsed.username or ""
+            password = parsed.password or ""
+            host = parsed.hostname or ""
+            netloc = host
+            if parsed.port:
+                netloc = f"{host}:{parsed.port}"
+            url = urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
         self.url = url
         self.timeout = timeout
 
-        auth = httpx.BasicAuth(username, password) if username or password else None
+        # monero-wallet-rpc uses HTTP Digest auth when --rpc-login is enabled.
+        auth = httpx.DigestAuth(username, password) if username or password else None
         self._client = httpx.AsyncClient(auth=auth, timeout=timeout)
 
     async def close(self) -> None:
