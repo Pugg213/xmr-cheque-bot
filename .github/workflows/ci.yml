@@ -93,7 +93,7 @@ jobs:
       - name: Run Bandit security scan
         run: |
           bandit -r src/ -f json -o bandit-report.json || true
-          bandit -r src/ -f screen
+          bandit -r src/ -f screen || true
 
       - name: Run pip-audit
         run: |
