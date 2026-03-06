@@ -185,6 +185,27 @@ def build_settings_keyboard(i18n: I18n) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def build_cheque_actions_keyboard(i18n: I18n, cheque_id: str) -> InlineKeyboardMarkup:
+    """Inline actions for a specific cheque."""
+    is_ru = i18n.lang == "ru"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=("🔄 QR / детали" if is_ru else "🔄 QR / details"),
+        callback_data=f"chq:qr:{cheque_id}",
+    )
+    builder.button(
+        text=("🚫 Отменить" if is_ru else "🚫 Cancel"),
+        callback_data=f"chq:cancel:{cheque_id}",
+    )
+    builder.button(
+        text=("🗑 Удалить" if is_ru else "🗑 Delete"),
+        callback_data=f"chq:delete:{cheque_id}",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 async def get_user_language(
     storage: RedisStorage, user_id: str, telegram_lang: str | None = None
 ) -> str:
@@ -407,14 +428,14 @@ async def cmd_cheque_details(message: Message, storage: RedisStorage) -> None:
             photo=photo,
             caption=details + "\n\n" + pay_instructions,
             parse_mode=ParseMode.HTML,
-            reply_markup=build_main_reply_keyboard(),
+            reply_markup=build_cheque_actions_keyboard(i18n, cheque.cheque_id),
         )
     except Exception as e:
         logger.error("cheque_details_qr_failed", user_id=user_id, cheque_id=cheque.cheque_id, error=str(e))
         await message.answer(
             details + "\n\n" + pay_instructions,
             parse_mode=ParseMode.HTML,
-            reply_markup=build_main_reply_keyboard(),
+            reply_markup=build_cheque_actions_keyboard(i18n, cheque.cheque_id),
         )
 
 
@@ -504,6 +525,99 @@ async def cmd_settings(message: Message, storage: RedisStorage) -> None:
 # =============================================================================
 # Callback Handlers
 # =============================================================================
+
+
+@router.callback_query(F.data.startswith("chq:"))
+async def cheque_action_callback(callback: CallbackQuery, storage: RedisStorage) -> None:
+    """Handle inline cheque actions (QR/details, cancel, delete)."""
+    user_id = str(callback.from_user.id)
+    lang = await get_user_language(storage, user_id, callback.from_user.language_code)
+    i18n = I18n(lang)
+
+    data = callback.data or ""
+    # format: chq:<action>:<cheque_id>
+    parts = data.split(":", 2)
+    if len(parts) != 3:
+        await callback.answer("Bad action", show_alert=False)
+        return
+
+    _prefix, action, cheque_id = parts
+
+    cheque = await storage.get_cheque(cheque_id)
+    if cheque is None or cheque.user_id != user_id:
+        await callback.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), show_alert=True)
+        return
+
+    if action == "qr":
+        cid = short_cheque_id(cheque.cheque_id)
+        status_text = i18n.status(cheque.status.value)
+        created = fmt_dt_msk(cheque.created_at)
+        expires = fmt_dt_msk(cheque.expires_at)
+        xmr = cheque.amount_xmr_display or format(atomic_to_xmr(cheque.amount_atomic_expected), ".12f")
+
+        details = (
+            f"<b>{i18n.t(I18nKeys.CHEQUE_DETAILS)}</b>\n"
+            f"ID: <code>{cid}</code>\n"
+            f"Created: {created}\n"
+            f"{i18n.t(I18nKeys.CHEQUE_STATUS)}: {status_text}\n"
+            f"{i18n.t(I18nKeys.CHEQUE_AMOUNT_RUB)}: <code>{cheque.amount_rub}</code>\n"
+            f"{i18n.t(I18nKeys.CHEQUE_AMOUNT_XMR)}: <code>{xmr}</code>\n"
+            f"{i18n.t(I18nKeys.CHEQUE_EXPIRES_AT)}: {expires}\n"
+            f"{i18n.t(I18nKeys.CHEQUE_ADDRESS)}: <code>{cheque.monero_address}</code>"
+        )
+
+        pay_instructions = i18n.t(I18nKeys.CHEQUE_PAY_INSTRUCTIONS, xmr=xmr, addr=cheque.monero_address)
+
+        try:
+            qr_bytes = generate_payment_qr(
+                address=cheque.monero_address,
+                amount_xmr=xmr,
+                tx_description=cheque.description or None,
+            )
+            photo = BufferedInputFile(qr_bytes, filename="cheque.png")
+            await callback.message.answer_photo(
+                photo=photo,
+                caption=details + "\n\n" + pay_instructions,
+                parse_mode=ParseMode.HTML,
+                reply_markup=build_cheque_actions_keyboard(i18n, cheque.cheque_id),
+            )
+        except Exception as e:
+            logger.error("cheque_action_qr_failed", user_id=user_id, cheque_id=cheque.cheque_id, error=str(e))
+            await callback.message.answer(
+                details + "\n\n" + pay_instructions,
+                parse_mode=ParseMode.HTML,
+                reply_markup=build_cheque_actions_keyboard(i18n, cheque.cheque_id),
+            )
+
+        await callback.answer()
+        return
+
+    if action == "cancel":
+        try:
+            await storage.cancel_cheque(cheque_id)
+            await callback.answer(i18n.t(I18nKeys.CHEQUE_CANCEL_SUCCESS), show_alert=False)
+        except StorageError:
+            await callback.answer(i18n.t(I18nKeys.CHEQUE_CANCEL_INVALID_STATE), show_alert=True)
+        return
+
+    if action == "delete":
+        try:
+            ok = await storage.delete_cheque(user_id=user_id, cheque_id=cheque_id)
+        except StorageError:
+            await callback.answer(
+                ("Сначала отмените активный чек (/cancel)." if lang == "ru" else "Cancel the active cheque first (/cancel)."),
+                show_alert=True,
+            )
+            return
+
+        if not ok:
+            await callback.answer(i18n.t(I18nKeys.ERROR_CHEQUE_NOT_FOUND), show_alert=True)
+            return
+
+        await callback.answer("✅" if lang == "ru" else "✅", show_alert=False)
+        return
+
+    await callback.answer("Unknown action", show_alert=False)
 
 
 @router.callback_query(F.data == "lang:en")
@@ -937,7 +1051,7 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
                     + f"ID: <code>{short_cheque_id(cheque.cheque_id)}</code>"
                 ),
                 parse_mode=ParseMode.HTML,
-                reply_markup=build_main_reply_keyboard(),
+                reply_markup=build_cheque_actions_keyboard(i18n, cheque.cheque_id),
             )
         except Exception as e:
             logger.error("qr_generation_failed", user_id=user_id, error=str(e))
@@ -951,7 +1065,7 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
                 + "\n\n"
                 + f"ID: <code>{short_cheque_id(cheque.cheque_id)}</code>",
                 parse_mode=ParseMode.HTML,
-                reply_markup=build_main_reply_keyboard(),
+                reply_markup=build_cheque_actions_keyboard(i18n, cheque.cheque_id),
             )
 
     except Exception as e:
