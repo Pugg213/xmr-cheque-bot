@@ -17,7 +17,7 @@ from typing import Protocol
 import structlog
 
 from xmr_cheque_bot.config import get_settings
-from xmr_cheque_bot.monero_rpc import MoneroWalletRPC
+from xmr_cheque_bot.monero_rpc import MoneroRPCError, MoneroWalletRPC
 from xmr_cheque_bot.redis_schema import ChequeRecord, ChequeStatus, UserWallet
 
 logger = structlog.get_logger()
@@ -158,9 +158,25 @@ class PaymentMonitor:
     async def run_forever(self) -> None:
         settings = get_settings()
         interval = int(getattr(settings, "monitor_interval_sec", 30))
+
+        consecutive_errors = 0
         while True:
-            await self.run_once()
-            await asyncio.sleep(interval)
+            try:
+                await self.run_once()
+                consecutive_errors = 0
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                consecutive_errors += 1
+                backoff = min(60, interval * (2 ** min(consecutive_errors, 4)))
+                logger.error(
+                    "monitor_loop_error",
+                    error=str(e),
+                    consecutive_errors=consecutive_errors,
+                    backoff_sec=backoff,
+                )
+                await asyncio.sleep(backoff)
 
     async def run_once(self) -> MonitorResult:
         settings = get_settings()
@@ -189,23 +205,35 @@ class PaymentMonitor:
                 if hasattr(self.storage, "decrypt_wallet_password"):
                     wallet_password = await self.storage.decrypt_wallet_password(wallet)  # type: ignore[misc]
 
-                async with self._rpc_lock:
-                    if not wallet.wallet_file_name:
-                        # Can't scan without wallet file
-                        continue
-                    if not is_safe_wallet_filename(wallet.wallet_file_name):
-                        logger.warning("wallet_file_name_invalid", user_id=user_id)
-                        continue
-                    await self.rpc.open_wallet(
-                        filename=wallet.wallet_file_name, password=wallet_password
-                    )
-                    try:
-                        await self.rpc.refresh(start_height=min_h)
-                        raw = await self.rpc.get_incoming_transfers(
-                            min_height=min_h, include_pool=True
+                try:
+                    async with self._rpc_lock:
+                        if not wallet.wallet_file_name:
+                            # Can't scan without wallet file
+                            continue
+                        if not is_safe_wallet_filename(wallet.wallet_file_name):
+                            logger.warning("wallet_file_name_invalid", user_id=user_id)
+                            continue
+                        await self.rpc.open_wallet(
+                            filename=wallet.wallet_file_name, password=wallet_password
                         )
-                    finally:
-                        await self.rpc.close_wallet(autosave=True)
+                        try:
+                            await self.rpc.refresh(start_height=min_h)
+                            raw = await self.rpc.get_incoming_transfers(
+                                min_height=min_h, include_pool=True
+                            )
+                        finally:
+                            await self.rpc.close_wallet(autosave=True)
+                except MoneroRPCError as e:
+                    logger.error(
+                        "monitor_rpc_error",
+                        user_id=user_id,
+                        method=getattr(e, "method", None),
+                        error=str(e),
+                    )
+                    continue
+                except Exception as e:
+                    logger.error("monitor_rpc_failed", user_id=user_id, error=str(e))
+                    continue
 
                 transfers = normalize_transfers(raw)
 
