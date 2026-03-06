@@ -18,6 +18,8 @@ class I18nKeys:
     ERROR = "common.error"
     LOADING = "common.loading"
     DONE = "common.done"
+    SKIP = "common.skip"
+    CHANGE = "common.change"
 
     # Start / Language
     START_WELCOME = "start.welcome"
@@ -30,11 +32,14 @@ class I18nKeys:
     WALLET_BIND_ENTER_ADDRESS = "wallet.bind.enter_address"
     WALLET_BIND_ENTER_VIEW_KEY = "wallet.bind.enter_view_key"
     WALLET_BIND_CONFIRMATION = "wallet.bind.confirmation"
+    WALLET_BIND_CONFIRM_ADDRESS = "wallet.bind.confirm_address"
+    WALLET_BIND_ADDRESS_CONFIRMED = "wallet.bind.address_confirmed"
     WALLET_BIND_SUCCESS = "wallet.bind.success"
     WALLET_BIND_INVALID_ADDRESS = "wallet.bind.invalid_address"
     WALLET_BIND_INVALID_VIEW_KEY = "wallet.bind.invalid_view_key"
     WALLET_BIND_ALREADY_BOUND = "wallet.bind.already_bound"
     WALLET_BIND_RATE_LIMIT = "wallet.bind.rate_limit"
+    WALLET_BIND_VIEWKEY_SENT_INSTEAD = "wallet.bind.viewkey_sent_instead"
 
     # Wallet-viewkey safety copy (CRITICAL SECURITY NOTICE)
     WALLET_VIEWKEY_WARNING_TITLE = "wallet.viewkey.warning_title"
@@ -86,6 +91,14 @@ class I18nKeys:
     PAYMENT_CONFIRMING = "payment.confirming"
     PAYMENT_CONFIRMED = "payment.confirmed"
 
+    # Payment status display
+    PAYMENT_STATUS_LABEL = "payment.status_label"
+    PAYMENT_CONFIRMATIONS_LABEL = "payment.confirmations_label"
+    PAYMENT_STATUS_PENDING = "payment.status.pending"
+    PAYMENT_STATUS_MEMPOOL = "payment.status.mempool"
+    PAYMENT_STATUS_CONFIRMING = "payment.status.confirming"
+    PAYMENT_STATUS_CONFIRMED = "payment.status.confirmed"
+
     # Settings
     SETTINGS_TITLE = "settings.title"
     SETTINGS_LANGUAGE = "settings.language"
@@ -117,6 +130,8 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.ERROR: "❌ Error",
         I18nKeys.LOADING: "⏳ Loading...",
         I18nKeys.DONE: "✅ Done",
+        I18nKeys.SKIP: "Skip",
+        I18nKeys.CHANGE: "✏️ Change",
         # Start
         I18nKeys.START_WELCOME: "Welcome to XMR Cheque Bot! 🎫\n\nI help you create Monero payment cheques — shareable payment requests with unique amounts for easy tracking.",
         I18nKeys.START_SELECT_LANGUAGE: "Please select your language:",
@@ -139,6 +154,18 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.WALLET_BIND_CONFIRMATION: lambda address: (
             f"Please confirm:\n\nAddress: <code>{address[:16]}...{address[-8:]}</code>\n\nIs this correct?"
         ),
+        I18nKeys.WALLET_BIND_CONFIRM_ADDRESS: "<b>Step 1/2: Wallet Address</b>\n\nSend your Monero address.\nIt starts with <code>4</code> or <code>8</code>.\n\nExample: <code>4A...xyz</code>",
+        I18nKeys.WALLET_BIND_ADDRESS_CONFIRMED: lambda address: (
+            f"✅ Address confirmed: <code>{address[:16]}...{address[-8:]}</code>\n\n"
+            f"<b>Step 2/2: View Key</b>\n\n"
+            f"Send your <b>private view key</b>.\n\n"
+            f"Where to find:\n"
+            f"• GUI: Settings → Show seed &amp; keys\n"
+            f"• CLI: command <code>viewkey</code>\n"
+            f"• Mobile: Settings → Keys\n\n"
+            f"⚠️ It's 64 characters (0-9, a-f)"
+        ),
+        I18nKeys.WALLET_BIND_VIEWKEY_SENT_INSTEAD: "❌ It looks like you sent a view key instead of an address.\n\nFirst, we need the wallet address (starts with 4).\n\nPlease send your Monero address:",
         I18nKeys.WALLET_BIND_SUCCESS: "✅ Wallet bound successfully!\n\nYou can now create cheques.",
         I18nKeys.WALLET_BIND_INVALID_ADDRESS: "❌ Invalid Monero address. Please check and try again.",
         I18nKeys.WALLET_BIND_INVALID_VIEW_KEY: "❌ Invalid view key. It must be 64 hexadecimal characters.",
@@ -213,6 +240,13 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.PAYMENT_CONFIRMED: lambda cid: (
             f"✅ Cheque <code>{cid[:8]}</code> fully confirmed! Payment complete."
         ),
+        # Payment status display
+        I18nKeys.PAYMENT_STATUS_LABEL: "Payment status",
+        I18nKeys.PAYMENT_CONFIRMATIONS_LABEL: "Confirmations",
+        I18nKeys.PAYMENT_STATUS_PENDING: "⏳ Awaiting payment",
+        I18nKeys.PAYMENT_STATUS_MEMPOOL: "🌐 Paid (in mempool)",
+        I18nKeys.PAYMENT_STATUS_CONFIRMING: "⏳ Paid (confirming)",
+        I18nKeys.PAYMENT_STATUS_CONFIRMED: "✅ Paid (confirmed)",
         # Settings
         I18nKeys.SETTINGS_TITLE: "⚙️ Settings",
         I18nKeys.SETTINGS_LANGUAGE: "🌐 Language",
@@ -246,6 +280,8 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.ERROR: "❌ Ошибка",
         I18nKeys.LOADING: "⏳ Загрузка...",
         I18nKeys.DONE: "✅ Готово",
+        I18nKeys.SKIP: "Пропустить",
+        I18nKeys.CHANGE: "✏️ Изменить",
         # Start
         I18nKeys.START_WELCOME: "Добро пожаловать в XMR Cheque Bot! 🎫\n\nЯ помогаю создавать чеки на оплату Monero — это запросы на оплату с уникальными суммами для удобного отслеживания.",
         I18nKeys.START_SELECT_LANGUAGE: "Пожалуйста, выберите язык:",
@@ -268,6 +304,18 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.WALLET_BIND_CONFIRMATION: lambda address: (
             f"Пожалуйста, подтвердите:\n\nАдрес: <code>{address[:16]}...{address[-8:]}</code>\n\nВсё верно?"
         ),
+        I18nKeys.WALLET_BIND_CONFIRM_ADDRESS: "<b>Шаг 1/2: Адрес кошелька</b>\n\nОтправьте ваш Monero-адрес.\nОн начинается с цифры <code>4</code> или <code>8</code>.\n\nПример: <code>4A...xyz</code>",
+        I18nKeys.WALLET_BIND_ADDRESS_CONFIRMED: lambda address: (
+            f"✅ Адрес подтверждён: <code>{address[:16]}...{address[-8:]}</code>\n\n"
+            f"<b>Шаг 2/2: Ключ просмотра</b>\n\n"
+            f"Отправьте ваш <b>приватный ключ просмотра</b>.\n\n"
+            f"Где найти:\n"
+            f"• GUI: Настройки → Показать сид и ключи\n"
+            f"• CLI: команда <code>viewkey</code>\n"
+            f"• Мобильный: Настройки → Ключи\n\n"
+            f"⚠️ Это 64 символа (0-9, a-f)"
+        ),
+        I18nKeys.WALLET_BIND_VIEWKEY_SENT_INSTEAD: "❌ Похоже, вы отправили ключ просмотра вместо адреса.\n\nСначала нужен адрес кошелька (начинается с 4).\n\nОтправьте ваш Monero-адрес:",
         I18nKeys.WALLET_BIND_SUCCESS: "✅ Кошелёк успешно привязан!\n\nТеперь можно создавать чеки.",
         I18nKeys.WALLET_BIND_INVALID_ADDRESS: "❌ Неверный Monero-адрес. Проверьте и попробуйте снова.",
         I18nKeys.WALLET_BIND_INVALID_VIEW_KEY: "❌ Неверный ключ просмотра. Он должен содержать 64 шестнадцатеричных символа.",
@@ -342,6 +390,13 @@ TRANSLATIONS: dict[str, dict[str, str | Callable]] = {
         I18nKeys.PAYMENT_CONFIRMED: lambda cid: (
             f"✅ Чек <code>{cid[:8]}</code> полностью подтверждён! Оплата завершена."
         ),
+        # Payment status display
+        I18nKeys.PAYMENT_STATUS_LABEL: "Статус оплаты",
+        I18nKeys.PAYMENT_CONFIRMATIONS_LABEL: "Подтверждений",
+        I18nKeys.PAYMENT_STATUS_PENDING: "⏳ Ожидает оплату",
+        I18nKeys.PAYMENT_STATUS_MEMPOOL: "🌐 Оплачен (в мемпуле)",
+        I18nKeys.PAYMENT_STATUS_CONFIRMING: "⏳ Оплачен (подтверждается)",
+        I18nKeys.PAYMENT_STATUS_CONFIRMED: "✅ Оплачен (подтверждён)",
         # Settings
         I18nKeys.SETTINGS_TITLE: "⚙️ Настройки",
         I18nKeys.SETTINGS_LANGUAGE: "🌐 Язык",
