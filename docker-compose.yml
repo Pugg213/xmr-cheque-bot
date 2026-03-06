@@ -46,7 +46,7 @@ services:
     container_name: xmr-bot-wallet-rpc
     command:
       - --stagenet
-      - --daemon-address=monerod:38081
+      - --daemon-address=${DAEMON_ADDRESS:-monerod:38081}
       - --rpc-bind-port=38083
       - --rpc-login=${WALLET_RPC_USER}:${WALLET_RPC_PASS}
       - --wallet-dir=/wallet
