@@ -47,7 +47,6 @@ services:
     command:
       - --stagenet
       - --daemon-address=monerod:38081
-      - --rpc-bind-ip=0.0.0.0
       - --rpc-bind-port=38083
       - --confirm-external-bind
       - --rpc-login=${WALLET_RPC_USER}:${WALLET_RPC_PASS}
