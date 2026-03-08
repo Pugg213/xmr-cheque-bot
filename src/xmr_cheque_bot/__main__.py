@@ -8,7 +8,8 @@ from xmr_cheque_bot.config import get_settings
 from xmr_cheque_bot.logging import configure_logging, get_logger
 from xmr_cheque_bot.monero_rpc import MoneroWalletRPC
 from xmr_cheque_bot.payment_monitor import PaymentMonitor
-from xmr_cheque_bot.storage import RedisStorage
+from xmr_cheque_bot.payment_monitor_two_phase import InvoicePaymentMonitor
+from xmr_cheque_bot.storage_two_phase import TwoPhaseStorage
 
 # Import bot-related modules only when needed
 try:
@@ -22,7 +23,7 @@ except ImportError:
 @asynccontextmanager
 async def setup_storage():
     """Setup and teardown Redis storage."""
-    storage = RedisStorage()
+    storage = TwoPhaseStorage()
     try:
         yield storage
     finally:
@@ -46,7 +47,7 @@ async def run_bot() -> None:
         raise RuntimeError("aiogram not installed, cannot run bot mode")
 
     class StorageMiddleware(BaseMiddleware):
-        def __init__(self, storage: RedisStorage):
+        def __init__(self, storage: TwoPhaseStorage):
             self._storage = storage
 
         async def __call__(self, handler, event, data):  # type: ignore[override]
@@ -58,7 +59,7 @@ async def run_bot() -> None:
     dp = Dispatcher()
 
     # Shared storage instance injected into handlers
-    storage = RedisStorage()
+    storage = TwoPhaseStorage()
     dp.update.middleware(StorageMiddleware(storage))
 
     # Include router
@@ -75,13 +76,43 @@ async def run_bot() -> None:
 
 
 async def run_monitor() -> None:
-    """Run payment monitor (background worker)."""
+    """Run payment monitor(s) (background worker).
+
+    We run:
+    - legacy cheque monitor (ChequeRecord)
+    - two-phase invoice monitor (Invoice)
+
+    Sequentially in one loop to avoid monero-wallet-rpc single-wallet concurrency issues.
+    """
     logger = get_logger()
     logger.info("monitor_starting")
 
     async with setup_storage() as storage, setup_rpc() as rpc:
-        monitor = PaymentMonitor(storage=storage, rpc=rpc)
-        await monitor.run_forever()
+        legacy = PaymentMonitor(storage=storage, rpc=rpc)
+        two_phase = InvoicePaymentMonitor(storage=storage, rpc=rpc)
+
+        settings = get_settings()
+        interval = int(getattr(settings, "monitor_interval_sec", 30))
+
+        consecutive_errors = 0
+        while True:
+            try:
+                await legacy.run_once()
+                await two_phase.run_once()
+                consecutive_errors = 0
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                consecutive_errors += 1
+                backoff = min(60, interval * (2 ** min(consecutive_errors, 4)))
+                logger.error(
+                    "monitor_loop_error",
+                    error=str(e),
+                    consecutive_errors=consecutive_errors,
+                    backoff_sec=backoff,
+                )
+                await asyncio.sleep(backoff)
 
 
 async def run_both() -> None:

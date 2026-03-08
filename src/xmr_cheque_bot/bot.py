@@ -341,6 +341,19 @@ async def cmd_start(message: Message, state: FSMContext, storage: RedisStorage) 
     # Clear any existing state
     await state.clear()
 
+    # Deep-link payload support: /start <offer_id>
+    payload = ""
+    try:
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) > 1:
+            payload = parts[1].strip()
+    except Exception:
+        payload = ""
+
+    if payload.startswith("off_"):
+        await show_two_phase_offer(message, storage, payload)
+        return
+
     await message.answer(
         i18n.t(I18nKeys.START_WELCOME),
         parse_mode=ParseMode.HTML,
@@ -1192,21 +1205,23 @@ async def show_cheque_summary(
     amount_rub = data.get("amount_rub", 0)
     description = data.get("description", "")
 
-    # Compute XMR amount
+    # Compute approximate XMR amount (for preview only)
+    approx_xmr = "?"
     try:
-        computed = await compute_cheque_amount(amount_rub)
-        await state.update_data(
-            amount_atomic=computed.amount_atomic_expected,
-            amount_xmr=computed.amount_xmr_display,
-        )
-    except Exception as e:
-        logger.error("amount_computation_failed", user_id=user_id, error=str(e))
-        await message.answer(i18n.t(I18nKeys.ERROR_GENERIC))
-        await state.clear()
-        return
+        from decimal import Decimal
 
-    data = await state.get_data()  # Refresh with computed values
-    amount_xmr = data.get("amount_xmr", "0")
+        from xmr_cheque_bot.rates import fetch_xmr_rub_rate
+
+        rate = await fetch_xmr_rub_rate()
+        approx = Decimal(amount_rub) / Decimal(str(rate))
+        approx_xmr = f"{approx:.6f}"
+    except Exception as e:
+        logger.warning("approx_rate_failed", user_id=user_id, error=str(e))
+
+    await state.update_data(amount_xmr=approx_xmr)
+
+    data = await state.get_data()
+    amount_xmr = data.get("amount_xmr", "?")
 
     await state.set_state(CreateChequeStates.confirm_cheque)
 
@@ -1255,8 +1270,74 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
         await callback.answer()
         return
 
-    # Determine current chain height for tx filtering.
-    # Prefer daemon RPC (does not require an opened wallet). Fallback to wallet-rpc.
+    # NOTE: min_height is computed at *invoice generation time* (when payer clicks Pay),
+    # so we don't need chain height here.
+
+    try:
+        from xmr_cheque_bot.api_two_phase import ChequeOfferAPI, ErrorResponse
+        from xmr_cheque_bot.i18n_two_phase import TwoPhaseI18nKeys, register_two_phase_translations
+
+        register_two_phase_translations()
+
+        offer_api = ChequeOfferAPI(storage)  # type: ignore[arg-type]
+        res = await offer_api.create_offer(
+            seller_user_id=user_id,
+            amount_rub=int(amount_rub),
+            recipient_address=wallet.monero_address,
+            description=description,
+        )
+        if isinstance(res, ErrorResponse):
+            raise RuntimeError(res.error)
+
+        await state.clear()
+
+        # Build deep link
+        link = ""
+        try:
+            me = await callback.bot.get_me()
+            if getattr(me, "username", None):
+                link = f"https://t.me/{me.username}?start={res.offer_id}"
+        except Exception:
+            link = ""
+
+        short = res.offer_id.replace("off_", "")[:8]
+
+        title = i18n.t(TwoPhaseI18nKeys.OFFER_CREATED_TITLE)
+        rate_info = i18n.t(TwoPhaseI18nKeys.OFFER_CREATED_RATE_INFO, amount_rub=amount_rub)
+        share_msg = i18n.t(TwoPhaseI18nKeys.OFFER_CREATED_SHARE)
+
+        text = (
+            f"<b>{title}</b>\n\n"
+            f"{rate_info}\n\n"
+            f"{share_msg}\n\n"
+            f"ID: <code>{escape_html(short)}</code>\n"
+        )
+        if link:
+            text += link
+
+        builder = InlineKeyboardBuilder()
+        if link:
+            builder.button(text="🔗 Открыть", url=link)
+        builder.button(text="🚫 Отменить", callback_data=f"offer:cancel:{res.offer_id}")
+        builder.adjust(1)
+
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=builder.as_markup())
+
+    except Exception as e:
+        logger.error("offer_creation_failed", user_id=user_id, error=str(e))
+        await callback.message.edit_text(i18n.t(I18nKeys.ERROR_GENERIC))
+        await state.clear()
+
+    await callback.answer()
+
+
+# =============================================================================
+# Two-phase cheque (Offer → Invoice) handlers
+# =============================================================================
+
+
+async def get_reorg_safe_min_height() -> int:
+    """Compute a conservative min_height for filtering old transfers."""
     settings = get_settings()
     current_height: int | None = None
 
@@ -1270,88 +1351,209 @@ async def confirm_cheque(callback: CallbackQuery, state: FSMContext, storage: Re
                 resp.raise_for_status()
                 current_height = int(resp.json().get("height", 0))
         except Exception as e:
-            logger.error("daemon_get_height_failed", user_id=user_id, error=str(e))
+            logger.warning("daemon_get_height_failed", error=str(e))
 
     if current_height is None:
         try:
             async with MoneroWalletRPC(url=settings.monero_rpc_url) as rpc:
                 current_height = await rpc.get_current_height()
         except Exception as e:
-            logger.error("monero_rpc_get_height_failed", user_id=user_id, error=str(e))
+            logger.warning("monero_rpc_get_height_failed", error=str(e))
 
-    # If height is unknown, still allow cheque creation (worst case: min_height=0).
+    # If height unknown, still allow (worst case: 0)
     reorg_buffer = 30
     base_height = int(current_height or 0)
-    min_height = max(0, base_height - reorg_buffer)
+    return max(0, base_height - reorg_buffer)
+
+
+async def show_two_phase_offer(message: Message, storage: RedisStorage, offer_id: str) -> None:
+    from datetime import UTC, datetime
+
+    from xmr_cheque_bot.api_two_phase import ChequeOfferAPI, ErrorResponse
+    from xmr_cheque_bot.i18n_two_phase import TwoPhaseI18nKeys, register_two_phase_translations
+    from xmr_cheque_bot.redis_schema_two_phase import OfferStatus
+
+    register_two_phase_translations()
+
+    user_id = str(message.from_user.id)
+    lang = await get_user_language(storage, user_id, message.from_user.language_code)
+    i18n = I18n(lang)
+
+    api = ChequeOfferAPI(storage)  # type: ignore[arg-type]
+    res = await api.get_offer(offer_id, include_approximate=True)
+
+    if isinstance(res, ErrorResponse):
+        await message.answer(res.error)
+        return
+
+    if res.status != OfferStatus.PENDING.value:
+        await message.answer("Этот чек больше недоступен.")
+        return
+
+    expires_at = datetime.fromisoformat(res.expires_at)
+    minutes_remaining = max(0, int((expires_at - datetime.now(UTC)).total_seconds() // 60))
+
+    title = i18n.t(TwoPhaseI18nKeys.OFFER_VIEW_TITLE)
+    amount_line = i18n.t(TwoPhaseI18nKeys.OFFER_VIEW_AMOUNT_RUB, amount_rub=res.amount_rub)
+
+    approx = res.approximate_xmr or "?"
+    approx_line = i18n.t(TwoPhaseI18nKeys.OFFER_VIEW_APPROXIMATE_XMR, approx_xmr=approx)
+    rate_info = i18n.t(TwoPhaseI18nKeys.OFFER_VIEW_RATE_FIXED_ON_PAY)
+    expires_line = i18n.t(TwoPhaseI18nKeys.OFFER_VIEW_EXPIRES_IN, minutes=minutes_remaining)
+
+    text = (
+        f"<b>{title}</b>\n\n"
+        f"{amount_line}\n"
+        f"{approx_line}\n\n"
+        f"{rate_info}\n\n"
+        f"{expires_line}"
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text=i18n.t(TwoPhaseI18nKeys.OFFER_VIEW_PAY_BUTTON), callback_data=f"offer:pay:{offer_id}")
+    builder.adjust(1)
+
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data.startswith("offer:cancel:"))
+async def cancel_offer_callback(callback: CallbackQuery, storage: RedisStorage) -> None:
+    from xmr_cheque_bot.api_two_phase import ChequeOfferAPI, ErrorResponse
+
+    user_id = str(callback.from_user.id)
+    offer_id = (callback.data or "").split(":", 2)[-1]
+
+    api = ChequeOfferAPI(storage)  # type: ignore[arg-type]
+    res = await api.cancel_offer(offer_id=offer_id, seller_user_id=user_id)
+
+    if isinstance(res, ErrorResponse):
+        await callback.answer(res.error, show_alert=True)
+        return
+
+    await callback.message.edit_text("✅ Отменено.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("offer:pay:"))
+async def pay_offer_callback(callback: CallbackQuery, storage: RedisStorage) -> None:
+    from datetime import UTC, datetime
+
+    from xmr_cheque_bot.api_two_phase import InvoiceAPI, ErrorResponse
+    from xmr_cheque_bot.i18n_two_phase import TwoPhaseI18nKeys, register_two_phase_translations
+
+    register_two_phase_translations()
+
+    user_id = str(callback.from_user.id)
+    lang = await get_user_language(storage, user_id, callback.from_user.language_code)
+    i18n = I18n(lang)
+
+    offer_id = (callback.data or "").split(":", 2)[-1]
+
+    min_height = await get_reorg_safe_min_height()
+
+    api = InvoiceAPI(storage)  # type: ignore[arg-type]
+    res = await api.generate_invoice(offer_id=offer_id, payer_user_id=user_id, min_height=min_height)
+
+    if isinstance(res, ErrorResponse):
+        await callback.answer(res.error, show_alert=True)
+        return
+
+    # Fetch offer address
+    offer = await storage.get_offer(offer_id) if hasattr(storage, "get_offer") else None  # type: ignore[attr-defined]
+    addr = getattr(offer, "recipient_address", "") if offer else ""
+
+    expires_at = datetime.fromisoformat(res.expires_at)
+    minutes_left = max(0, int((expires_at - datetime.now(UTC)).total_seconds() // 60))
+
+    title = i18n.t(TwoPhaseI18nKeys.INVOICE_GENERATED_TITLE)
+    exact_amount = i18n.t(TwoPhaseI18nKeys.INVOICE_PAY_EXACT_AMOUNT, exact_xmr=res.amount_xmr)
+    rate_line = i18n.t(TwoPhaseI18nKeys.INVOICE_RATE_FIXED, rate=res.rate_xmr_rub)
+    valid_for = i18n.t(TwoPhaseI18nKeys.INVOICE_VALID_FOR)
+    countdown = i18n.t(TwoPhaseI18nKeys.INVOICE_COUNTDOWN_MINUTES, minutes=minutes_left)
+
+    text = (
+        f"<b>{title}</b>\n\n"
+        f"{exact_amount}\n"
+        f"{rate_line}\n"
+        f"{valid_for}\n"
+        f"{countdown}\n\n"
+        f"<code>{escape_html(addr)}</code>"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text=i18n.t(TwoPhaseI18nKeys.INVOICE_EXPIRED_REFRESH_BUTTON), callback_data=f"invoice:refresh:{res.invoice_id}")
+    kb.adjust(1)
 
     try:
-        # Create cheque
-        cheque = await storage.create_cheque(
-            user_id=user_id,
-            amount_rub=amount_rub,
-            amount_atomic=amount_atomic,
-            amount_xmr_display=amount_xmr,
-            monero_address=wallet.monero_address,
-            min_height=min_height,
-            description=description,
-        )
-
-        await state.clear()
-
-        # Send success message
-        await callback.message.edit_text(i18n.t(I18nKeys.CHEQUE_CREATE_SUCCESS))
-
-        # Generate and send QR code with full details
-        cid = short_cheque_id(cheque.cheque_id)
-        safe_cid = escape_html(cid)
-        safe_xmr = escape_html(amount_xmr)
-        safe_addr = escape_html(wallet.monero_address)
-        expires = fmt_dt_msk(cheque.expires_at)
-
-        # Build payment status line (initially pending)
-        payment_status = i18n.t(I18nKeys.PAYMENT_STATUS_PENDING)
-
-        details = (
-            f"<b>{i18n.t(I18nKeys.CHEQUE_DETAILS)}</b>\n\n"
-            f"✅ {i18n.t(I18nKeys.CHEQUE_CREATE_SUCCESS)}\n\n"
-            f"ID: <code>{safe_cid}</code>\n"
-            f"{i18n.t(I18nKeys.CHEQUE_STATUS)}: {payment_status}\n"
-            f"{i18n.t(I18nKeys.CHEQUE_AMOUNT_RUB)}: <b>{amount_rub} ₽</b>\n"
-            f"{i18n.t(I18nKeys.CHEQUE_AMOUNT_XMR)}: <code>{safe_xmr}</code>\n"
-            f"{i18n.t(I18nKeys.CHEQUE_EXPIRES_AT)}: {expires}\n"
-            f"{i18n.t(I18nKeys.CHEQUE_ADDRESS)}: <code>{safe_addr}</code>"
-        )
-
-        pay_instructions = i18n.t(I18nKeys.CHEQUE_PAY_INSTRUCTIONS, xmr=safe_xmr, addr=safe_addr)
-
-        try:
-            qr_bytes = generate_payment_qr(
-                address=wallet.monero_address,
-                amount_xmr=amount_xmr,
-                tx_description=description or None,
-            )
-
-            photo = BufferedInputFile(qr_bytes, filename="cheque.png")
-
-            await callback.message.answer_photo(
-                photo=photo,
-                caption=details + "\n\n" + pay_instructions,
-                parse_mode=ParseMode.HTML,
-                reply_markup=build_cheque_actions_keyboard(i18n, cheque.cheque_id, "pending"),
-            )
-        except Exception as e:
-            logger.error("qr_generation_failed", user_id=user_id, error=str(e))
-            # Still show address even if QR fails
-            await callback.message.answer(
-                details + "\n\n" + pay_instructions,
-                parse_mode=ParseMode.HTML,
-                reply_markup=build_cheque_actions_keyboard(i18n, cheque.cheque_id, "pending"),
-            )
-
+        qr_bytes = generate_payment_qr(address=addr, amount_xmr=res.amount_xmr)
+        photo = BufferedInputFile(qr_bytes, filename="invoice.png")
+        await callback.message.delete()
+        await callback.message.answer_photo(photo=photo, caption=text, parse_mode=ParseMode.HTML, reply_markup=kb.as_markup())
     except Exception as e:
-        logger.error("cheque_creation_failed", user_id=user_id, error=str(e))
-        await callback.message.edit_text(i18n.t(I18nKeys.ERROR_GENERIC))
-        await state.clear()
+        logger.error("invoice_qr_generation_failed", error=str(e))
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb.as_markup())
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("invoice:refresh:"))
+async def refresh_invoice_callback(callback: CallbackQuery, storage: RedisStorage) -> None:
+    from datetime import UTC, datetime
+
+    from xmr_cheque_bot.api_two_phase import InvoiceAPI, ErrorResponse
+
+    user_id = str(callback.from_user.id)
+    invoice_id = (callback.data or "").split(":", 2)[-1]
+
+    inv = await storage.get_invoice(invoice_id) if hasattr(storage, "get_invoice") else None  # type: ignore[attr-defined]
+    if inv is None:
+        await callback.answer("Invoice not found", show_alert=True)
+        return
+
+    # If not expired yet — show remaining time
+    now = datetime.now(UTC)
+    if not inv.is_expired() and getattr(inv, "status", "") != "expired":
+        seconds = int((inv.expires_at - now).total_seconds())
+        minutes = max(0, seconds // 60)
+        await callback.answer(f"Ещё {minutes} мин до истечения", show_alert=True)
+        return
+
+    min_height = await get_reorg_safe_min_height()
+
+    api = InvoiceAPI(storage)  # type: ignore[arg-type]
+    res = await api.refresh_invoice(invoice_id=invoice_id, payer_user_id=user_id, min_height=min_height)
+    if isinstance(res, ErrorResponse):
+        await callback.answer(res.error, show_alert=True)
+        return
+
+    # Fetch offer address
+    offer = await storage.get_offer(res.cheque_offer_id) if hasattr(storage, "get_offer") else None  # type: ignore[attr-defined]
+    addr = getattr(offer, "recipient_address", "") if offer else ""
+
+    expires_at = datetime.fromisoformat(res.expires_at)
+    minutes_left = max(0, int((expires_at - now).total_seconds() // 60))
+
+    text = (
+        f"<b>✅ Новый инвойс создан</b>\n\n"
+        f"<b>Оплатите ровно:</b> <code>{escape_html(res.amount_xmr)}</code> XMR\n"
+        f"🔒 Курс зафиксирован: 1 XMR = {escape_html(res.rate_xmr_rub)} ₽\n"
+        f"⏱ Действителен 15 минут\n"
+        f"⏳ Осталось {minutes_left} минут\n\n"
+        f"<code>{escape_html(addr)}</code>"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить сумму", callback_data=f"invoice:refresh:{res.invoice_id}")
+    kb.adjust(1)
+
+    try:
+        qr_bytes = generate_payment_qr(address=addr, amount_xmr=res.amount_xmr)
+        photo = BufferedInputFile(qr_bytes, filename="invoice.png")
+        await callback.message.delete()
+        await callback.message.answer_photo(photo=photo, caption=text, parse_mode=ParseMode.HTML, reply_markup=kb.as_markup())
+    except Exception as e:
+        logger.error("invoice_refresh_qr_failed", error=str(e))
+        await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb.as_markup())
 
     await callback.answer()
 
