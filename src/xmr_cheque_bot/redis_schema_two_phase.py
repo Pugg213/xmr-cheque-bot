@@ -169,7 +169,7 @@ class Invoice:
 
     # Anti-replay / collision guard
     # Do not match transfers below this height (mempool height=0 is allowed).
-    min_height: int = 0
+    min_height: int
 
     # Rate snapshot at generation time
     rate_xmr_rub: str  # Decimal as string
